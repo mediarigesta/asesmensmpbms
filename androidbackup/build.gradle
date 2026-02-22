@@ -4,11 +4,9 @@ buildscript {
         google()
         mavenCentral()
     }
-
     dependencies {
         classpath 'com.android.tools.build:gradle:8.2.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        // TAMBAHKAN BARIS INI:
         classpath 'com.google.gms:google-services:4.4.0'
     }
 }
@@ -24,14 +22,15 @@ subprojects {
     afterEvaluate {
         if (project.hasProperty('android')) {
             project.android {
+                compileSdkVersion 34
                 compileOptions {
-                    sourceCompatibility = JavaVersion.VERSION_17
-                    targetCompatibility = JavaVersion.VERSION_17
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
                 }
             }
         }
         if (project.plugins.hasPlugin('kotlin-android')) {
-            tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
+            tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
                 kotlinOptions {
                     jvmTarget = "17"
                 }
@@ -41,10 +40,9 @@ subprojects {
 }
 
 rootProject.buildDir = '../build'
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
-}
-subprojects {
     project.evaluationDependsOn(':app')
 }
 
