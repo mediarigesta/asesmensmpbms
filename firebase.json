@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "budimulia-exam",
     "public": "build/web",
     "ignore": [
       "firebase.json",

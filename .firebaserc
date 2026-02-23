@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "aplikasi-penilaian-9caa1"
-  }
+  },
+  "targets": {
+    "aplikasi-penilaian-9caa1": {
+      "hosting": {
+        "budimulia-exam": [
+          "budimulia-exam"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
