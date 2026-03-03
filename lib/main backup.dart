@@ -3,9 +3,6 @@ import 'dart:math';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io' show Platform;
-// Web kiosk — conditional import: web pakai impl, lainnya pakai stub
-import 'web_kiosk_stub.dart'
-if (dart.library.html) 'web_kiosk_impl.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -248,7 +245,7 @@ enum TipeSoal { pilihanGanda, benarSalah, uraian }
 // Windows  : Keyboard blocker Flutter-level + MethodChannel Win32
 // ============================================================
 class KioskService {
-  static const _channel    = MethodChannel('com.bmsexam/kiosk');
+  static const _channel = MethodChannel('com.bmsexam/kiosk');
   static const _winChannel = MethodChannel('com.bmsexam/windows_security');
 
   static Future<bool> isAdminActive() async {
@@ -257,12 +254,8 @@ class KioskService {
     catch (_) { return false; }
   }
 
-  static Future<void> start({int maxCurang = 3, String examTitle = 'Ujian'}) async {
-    if (kIsWeb) {
-      // Panggil web_kiosk_impl.dart (di-compile hanya saat build web)
-      webKioskStart(maxCurang, examTitle);
-      return;
-    }
+  static Future<void> start() async {
+    if (kIsWeb) return;
     if (isAndroid) {
       try { await _channel.invokeMethod('startKiosk'); }
       catch (e) { debugPrint('KioskService.start (Android) error: $e'); }
@@ -273,10 +266,7 @@ class KioskService {
   }
 
   static Future<void> stop() async {
-    if (kIsWeb) {
-      webKioskStop();
-      return;
-    }
+    if (kIsWeb) return;
     if (isAndroid) {
       try { await _channel.invokeMethod('stopKiosk'); }
       catch (e) { debugPrint('KioskService.stop (Android) error: $e'); }
@@ -284,17 +274,6 @@ class KioskService {
       try { await _winChannel.invokeMethod('disableKiosk'); }
       catch (e) { debugPrint('KioskService.stop (Windows) error: $e'); }
     }
-  }
-
-  static void registerWebCallbacks({
-    void Function(int count, int max, String reason)? onViolation,
-    void Function(String reason)? onAutoSubmit,
-  }) {
-    if (!kIsWeb) return;
-    webKioskRegisterCallbacks(
-      onViolation: onViolation,
-      onAutoSubmit: onAutoSubmit,
-    );
   }
 
   static Future<bool> isActive() async {
@@ -7185,47 +7164,14 @@ class _ExamScreenState extends State<ExamScreen>
   }
 
   void _initExam() async {
-    if (widget.exam.antiCurang) {
-      if (isAndroid) {
-        try {
-          await FlutterWindowManagerPlus.addFlags(FlutterWindowManagerPlus.FLAG_SECURE);
-          await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-          await KioskService.start();
-        } catch (e) {
-          debugPrint('Lock screen error: $e');
-        }
-      } else if (kIsWeb) {
-        // Daftarkan callback pelanggaran dari kiosk.js
-        KioskService.registerWebCallbacks(
-          onViolation: (count, max, reason) {
-            if (!mounted || _submitted) return;
-            setState(() => _curang = count);
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('⚠️ Peringatan $count dari $max — Jangan keluar halaman ujian!'),
-              backgroundColor: Colors.orange,
-              duration: const Duration(seconds: 3),
-            ));
-            // Catat ke Firestore
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(widget.user.id)
-                .update({'curang': count});
-          },
-          onAutoSubmit: (reason) {
-            if (_submitted) return;
-            // Update status melanggar lalu submit
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(widget.user.id)
-                .update({'status_mengerjakan': 'melanggar'});
-            _doSubmit(reason: 'max_violation');
-          },
-        );
-        // Aktifkan kiosk web
-        await KioskService.start(
-          maxCurang: widget.exam.maxCurang,
-          examTitle: widget.exam.judul,
-        );
+    if (isAndroid && widget.exam.antiCurang) {
+      try {
+        await FlutterWindowManagerPlus.addFlags(FlutterWindowManagerPlus.FLAG_SECURE);
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        // Aktifkan kiosk untuk ujian link sama seperti ujian native
+        await KioskService.start();
+      } catch (e) {
+        debugPrint('Lock screen error: $e');
       }
     }
     await FirebaseFirestore.instance
@@ -7242,8 +7188,7 @@ class _ExamScreenState extends State<ExamScreen>
     if (isAndroid) {
       await FlutterWindowManagerPlus.clearFlags(FlutterWindowManagerPlus.FLAG_SECURE);
       try { SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); } catch (_) {}
-      try { await KioskService.stop(); } catch (_) {}
-    } else if (kIsWeb) {
+      // Stop kiosk mode saat ujian selesai
       try { await KioskService.stop(); } catch (_) {}
     }
     await FirebaseFirestore.instance
@@ -9516,7 +9461,6 @@ class _PasswordResetWidgetState extends State<PasswordResetWidget> {
               border: Border.all(color: Colors.blue.shade200),
             ),
             child: Column(
-
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(children: [
