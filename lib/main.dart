@@ -17,6 +17,7 @@ import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:archive/archive.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 // Platform-specific packages — hanya aktif di Android/iOS, di Web pakai stub
 import 'package:camera/camera.dart' if (dart.library.html) 'stub_camera.dart';
@@ -24,6 +25,7 @@ import 'package:battery_plus/battery_plus.dart' if (dart.library.html) 'stub_bat
 import 'package:webview_flutter/webview_flutter.dart' if (dart.library.html) 'stub_webview.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart' if (dart.library.html) 'stub_webview_android.dart';
 import 'package:flutter_windowmanager_plus/flutter_windowmanager_plus.dart' if (dart.library.html) 'stub_windowmanager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
 // PLATFORM HELPERS
@@ -78,6 +80,191 @@ class _WindowsKeyboardBlocker extends StatelessWidget {
     );
   }
 }
+
+// ============================================================
+// THEME SYSTEM
+// ============================================================
+enum BMTheme { navy, dark, ocean, forest, purple, rose }
+
+class BMColors extends ThemeExtension<BMColors> {
+  final Color primary;
+  final Color gradient2;
+  final Color surface;
+  final Color cardBg;
+
+  const BMColors({
+    required this.primary,
+    required this.gradient2,
+    required this.surface,
+    required this.cardBg,
+  });
+
+  @override
+  BMColors copyWith({Color? primary, Color? gradient2, Color? surface, Color? cardBg}) =>
+      BMColors(
+        primary: primary ?? this.primary,
+        gradient2: gradient2 ?? this.gradient2,
+        surface: surface ?? this.surface,
+        cardBg: cardBg ?? this.cardBg,
+      );
+
+  @override
+  BMColors lerp(BMColors? other, double t) {
+    if (other is! BMColors) return this;
+    return BMColors(
+      primary: Color.lerp(primary, other.primary, t)!,
+      gradient2: Color.lerp(gradient2, other.gradient2, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      cardBg: Color.lerp(cardBg, other.cardBg, t)!,
+    );
+  }
+}
+
+extension BMColorsX on BuildContext {
+  BMColors get bm => Theme.of(this).extension<BMColors>()!;
+}
+
+class BMThemePresets {
+  static const _presets = {
+    BMTheme.navy:   BMColors(primary: Color(0xFF0F172A), gradient2: Color(0xFF1E3A5F), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.dark:   BMColors(primary: Color(0xFF1E293B), gradient2: Color(0xFF0F172A), surface: Color(0xFF0F172A), cardBg: Color(0xFF1E293B)),
+    BMTheme.ocean:  BMColors(primary: Color(0xFF0369A1), gradient2: Color(0xFF0284C7), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.forest: BMColors(primary: Color(0xFF166534), gradient2: Color(0xFF15803D), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.purple: BMColors(primary: Color(0xFF6B21A8), gradient2: Color(0xFF7E22CE), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.rose:   BMColors(primary: Color(0xFF9F1239), gradient2: Color(0xFFBE123C), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+  };
+
+  static const _names = {
+    BMTheme.navy:   'Navy (Default)',
+    BMTheme.dark:   'Dark Mode',
+    BMTheme.ocean:  'Ocean Blue',
+    BMTheme.forest: 'Forest Green',
+    BMTheme.purple: 'Royal Purple',
+    BMTheme.rose:   'Deep Rose',
+  };
+
+  static String name(BMTheme t) => _names[t]!;
+  static BMColors colors(BMTheme t) => _presets[t]!;
+
+  static ThemeData of(BMTheme t) {
+    final c = _presets[t]!;
+    final isDark = t == BMTheme.dark;
+    return ThemeData(
+      useMaterial3: true,
+      brightness: isDark ? Brightness.dark : Brightness.light,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: c.primary,
+        brightness: isDark ? Brightness.dark : Brightness.light,
+      ),
+      textTheme: GoogleFonts.poppinsTextTheme(
+        isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
+      ),
+      extensions: [c],
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          elevation: 0,
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: c.primary, width: 1.5),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+      cardTheme: CardThemeData(
+        elevation: 2,
+        shadowColor: Colors.black26,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        surfaceTintColor: Colors.transparent,
+      ),
+      dialogTheme: DialogThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        elevation: 8,
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// SESSION TIMEOUT MIXIN
+// ============================================================
+mixin IdleTimeoutMixin<T extends StatefulWidget> on State<T> {
+  Timer? _idleTimer;
+  DateTime _lastActivity = DateTime.now();
+  static const _idleLimit = Duration(minutes: 15);
+
+  void resetIdleTimer() => _lastActivity = DateTime.now();
+
+  void startIdleWatcher() {
+    _idleTimer?.cancel();
+    _lastActivity = DateTime.now();
+    _idleTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (DateTime.now().difference(_lastActivity) >= _idleLimit) {
+        _idleTimer?.cancel();
+        _showIdleDialog();
+      }
+    });
+  }
+
+  void _showIdleDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.access_time, color: Colors.orange),
+          SizedBox(width: 8),
+          Text('Sesi Tidak Aktif'),
+        ]),
+        content: const Text('Sesi Anda tidak aktif selama 15 menit.\nApakah Anda ingin tetap masuk?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              startIdleWatcher();
+            },
+            child: const Text('Tetap Masuk'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+                (r) => false,
+              );
+            },
+            child: const Text('Keluar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void stopIdleWatcher() => _idleTimer?.cancel();
+}
+
+// ============================================================
+// THEME NOTIFIER (global)
+// ============================================================
+final _themeNotifier = ValueNotifier<BMTheme>(BMTheme.navy);
 
 // ============================================================
 // MAIN
@@ -507,14 +694,14 @@ class BMExamApp extends StatelessWidget {
   const BMExamApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Budi Mulia Exam',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F172A)),
+  Widget build(BuildContext context) => ValueListenableBuilder<BMTheme>(
+    valueListenable: _themeNotifier,
+    builder: (_, t, __) => MaterialApp(
+      title: 'Budi Mulia Exam',
+      debugShowCheckedModeBanner: false,
+      theme: BMThemePresets.of(t),
+      home: const SplashScreen(),
     ),
-    home: const SplashScreen(),
   );
 }
 
@@ -538,12 +725,47 @@ class _SplashScreenState extends State<SplashScreen>
     _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _fade = CurvedAnimation(parent: _anim, curve: Curves.easeIn);
     _anim.forward();
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const LoginScreen()));
-      }
-    });
+    _loadThemeAndSession();
+  }
+
+  void _loadThemeAndSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Load saved theme
+    final savedTheme = prefs.getString('app_theme');
+    if (savedTheme != null) {
+      try {
+        _themeNotifier.value = BMTheme.values.firstWhere((t) => t.name == savedTheme);
+      } catch (_) {}
+    }
+
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+
+    // Check auto-login
+    final savedId = prefs.getString('saved_user_id');
+    if (savedId != null && savedId.isNotEmpty) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(savedId).get();
+        if (doc.exists && mounted) {
+          final u = UserAccount.fromFirestore(doc);
+          if (u.statusAktif != 'terblokir') {
+            if (u.role == 'admin1') {
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => Admin1Dashboard(admin: u)));
+            } else if (u.role == 'guru') {
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => GuruDashboard(guru: u)));
+            } else {
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomeScreen(user: u)));
+            }
+            return;
+          }
+        }
+      } catch (_) {}
+      // If failed, clear saved id and go to login
+      await prefs.remove('saved_user_id');
+    }
+    if (mounted) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+    }
   }
 
   @override
@@ -554,24 +776,37 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFF0F172A),
+    backgroundColor: BMThemePresets.colors(_themeNotifier.value).primary,
     body: FadeTransition(
       opacity: _fade,
       child: Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Image.asset('assets/logo.png', width: 160, height: 160),
-          SizedBox(height: 16),
+          Container(
+            width: 180,
+            height: 180,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white24, width: 1.5),
+            ),
+            padding: const EdgeInsets.all(10),
+            child: Image.asset('assets/logo.png', width: 160, height: 160),
+          ),
+          const SizedBox(height: 20),
           Text("Budi Mulia Exam",
               style: TextStyle(
                   color: Colors.white,
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 2)),
-          SizedBox(height: 6),
+          const SizedBox(height: 6),
           Text("SMP Budi Mulia Jakarta",
               style: TextStyle(color: Colors.white54, fontSize: 14)),
-          SizedBox(height: 40),
-          CircularProgressIndicator(color: Colors.white54, strokeWidth: 2),
+          const SizedBox(height: 44),
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(color: Colors.white38, strokeWidth: 2),
+          ),
         ]),
       ),
     ),
@@ -592,10 +827,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final _p = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
+  bool _rememberMe = false;
+
+  @override
+  void dispose() {
+    _u.dispose();
+    _p.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFF0F172A),
+    backgroundColor: BMThemePresets.colors(_themeNotifier.value).primary,
     body: Center(
       child: SingleChildScrollView(
         child: Column(
@@ -614,17 +857,24 @@ class _LoginScreenState extends State<LoginScreen> {
 
             // Card Login
             Container(
-              width: 360,
+              constraints: const BoxConstraints(maxWidth: 480),
+              width: double.infinity,
               margin: const EdgeInsets.symmetric(horizontal: 24),
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(28),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 20,
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 30,
+                      spreadRadius: 0,
                       offset: const Offset(0, 8)),
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                      offset: const Offset(0, 2)),
                 ],
               ),
               child: Column(children: [
@@ -666,13 +916,32 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
+                // Remember Me row
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Checkbox(
+                        value: _rememberMe,
+                        onChanged: (v) => setState(() => _rememberMe = v ?? false),
+                        activeColor: const Color(0xFF0F172A),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text("Ingat Saya",
+                        style: TextStyle(fontSize: 13, color: Colors.black87)),
+                  ],
+                ),
+                const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F172A),
+                      backgroundColor: BMThemePresets.colors(_themeNotifier.value).primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),
@@ -725,6 +994,14 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
+      // Save or clear user session based on Remember Me
+      final prefs = await SharedPreferences.getInstance();
+      if (_rememberMe) {
+        await prefs.setString('saved_user_id', u.id);
+      } else {
+        await prefs.remove('saved_user_id');
+      }
+
       // Auto-reset status siswa jika "mengerjakan" tapi tidak ada ujian aktif
       if (u.role == 'siswa' && u.statusMengerjakan == 'mengerjakan') {
         final examSnap = await FirebaseFirestore.instance.collection('exam').get();
@@ -739,6 +1016,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
+      if (!mounted) return;
       if (u.role == 'admin1') {
         Navigator.pushReplacement(context,
             MaterialPageRoute(builder: (_) => Admin1Dashboard(admin: u)));
@@ -775,7 +1053,8 @@ class GuruDashboard extends StatefulWidget {
   State<GuruDashboard> createState() => _GuruDashboardState();
 }
 
-class _GuruDashboardState extends State<GuruDashboard> {
+class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _guruTab = 0;
   Set<String> _mapelRoles = {};
   bool _isAdmin = false;
@@ -785,6 +1064,13 @@ class _GuruDashboardState extends State<GuruDashboard> {
   void initState() {
     super.initState();
     _loadRoles();
+    startIdleWatcher();
+  }
+
+  @override
+  void dispose() {
+    stopIdleWatcher();
+    super.dispose();
   }
 
   // Load roles & mapelRoles dari Firestore (real-time)
@@ -809,20 +1095,29 @@ class _GuruDashboardState extends State<GuruDashboard> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFFF1F5F9),
-    body: Column(children: [
+    key: _scaffoldKey,
+    backgroundColor: context.bm.surface,
+    drawer: _buildGuruDrawer(),
+    body: SafeArea(
+      bottom: false,
+      child: Column(children: [
       // PIN & Token bar (jika admin aktifkan)
       _buildGuruPinTokenBar(),
       // Header
       Container(
-        padding: const EdgeInsets.fromLTRB(20, 50, 20, 16),
-        decoration: const BoxDecoration(
+        padding: const EdgeInsets.fromLTRB(4, 12, 20, 16),
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF0F172A), Color(0xFF1E3A5F)],
+            colors: [context.bm.primary, context.bm.gradient2],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ),
         ),
         child: Row(children: [
+          IconButton(
+            icon: const Icon(Icons.menu, color: Color(0xFF60A5FA)),
+            tooltip: "Menu",
+            onPressed: () => _scaffoldKey.currentState!.openDrawer(),
+          ),
           // Avatar
           CircleAvatar(
             radius: 22,
@@ -886,12 +1181,16 @@ class _GuruDashboardState extends State<GuruDashboard> {
       // Tab bar
       Container(
         color: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Row(children: [
-          _tabBtn(0, Icons.add_circle_outline, "Buat Ujian"),
-          _tabBtn(1, Icons.history_edu, "History"),
-          _tabBtn(2, Icons.grading, "Rekap Nilai"),
-        ]),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(children: [
+            _tabBtn(0, Icons.add_circle_outline, "Buat Ujian"),
+            _tabBtn(1, Icons.history_edu, "History"),
+            _tabBtn(2, Icons.grading, "Rekap Nilai"),
+            _tabBtn(3, Icons.bar_chart_outlined, "Analitik"),
+          ]),
+        ),
       ),
 
       // Body
@@ -900,8 +1199,14 @@ class _GuruDashboardState extends State<GuruDashboard> {
       else if (!_isAdmin && _mapelRoles.isEmpty)
         Expanded(child: _noMapelWarning())
       else
-        Expanded(child: _buildTab()),
-    ]),
+        Expanded(child: GestureDetector(
+          onTap: resetIdleTimer,
+          onPanDown: (_) => resetIdleTimer(),
+          behavior: HitTestBehavior.translucent,
+          child: _buildTab(),
+        )),
+      ]),
+    ),
   );
 
   /// Widget PIN + Token untuk guru (hanya jika admin mengaktifkan toggle)
@@ -988,19 +1293,19 @@ class _GuruDashboardState extends State<GuruDashboard> {
   Widget _tabBtn(int idx, IconData icon, String label) => GestureDetector(
     onTap: () => setState(() => _guruTab = idx),
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(
-          color: _guruTab == idx ? const Color(0xFF0F172A) : Colors.transparent,
+          color: _guruTab == idx ? context.bm.primary : Colors.transparent,
           width: 2,
         )),
       ),
       child: Column(children: [
-        Icon(icon, color: _guruTab == idx ? const Color(0xFF0F172A) : Colors.grey, size: 20),
+        Icon(icon, color: _guruTab == idx ? context.bm.primary : Colors.grey, size: 20),
         const SizedBox(height: 2),
         Text(label, style: TextStyle(
             fontSize: 10,
-            color: _guruTab == idx ? const Color(0xFF0F172A) : Colors.grey,
+            color: _guruTab == idx ? context.bm.primary : Colors.grey,
             fontWeight: _guruTab == idx ? FontWeight.bold : FontWeight.normal)),
       ]),
     ),
@@ -1010,8 +1315,104 @@ class _GuruDashboardState extends State<GuruDashboard> {
     switch (_guruTab) {
       case 1: return ExamHistoryList(filterMapel: _isAdmin ? null : _mapelRoles);
       case 2: return RekapsNilaiScreen(filterMapel: _isAdmin ? null : _mapelRoles);
+      case 3: return AnalyticsScreen(filterMapel: _isAdmin ? null : _mapelRoles);
       default: return ExamCreatorForm(allowedMapel: _isAdmin ? null : _mapelRoles);
     }
+  }
+
+  Widget _buildGuruDrawer() {
+    return Drawer(
+      child: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [context.bm.primary, context.bm.gradient2],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            GestureDetector(
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _guruTab = 0);
+              },
+              child: Image.asset('assets/logo.png', width: 56, height: 56),
+            ),
+            const SizedBox(height: 12),
+            Text(widget.guru.nama,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+              child: Text(_isAdmin ? 'Admin & Guru' : 'Guru',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: ListView(padding: EdgeInsets.zero, children: [
+            ListTile(
+              leading: Image.asset('assets/logo.png', width: 22, height: 22),
+              title: const Text('Dashboard'),
+              selected: _guruTab == 0,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 0); },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Profil Saya'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.guru, canEdit: false),
+                ));
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.add_circle_outline),
+              title: const Text('Buat Ujian'),
+              selected: _guruTab == 0,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 0); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.history_edu),
+              title: const Text('History Ujian'),
+              selected: _guruTab == 1,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 1); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.grading),
+              title: const Text('Rekap Nilai'),
+              selected: _guruTab == 2,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 2); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.bar_chart_outlined),
+              title: const Text('Analitik'),
+              selected: _guruTab == 3,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 3); },
+            ),
+            const Divider(height: 1),
+            _buildThemeSwitcher(),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Keluar', style: TextStyle(color: Colors.red)),
+              onTap: () { Navigator.pop(context); _confirmLogout(context); },
+            ),
+          ]),
+        ),
+      ]),
+    );
   }
 
   void _confirmLogout(BuildContext context) {
@@ -1027,10 +1428,16 @@ class _GuruDashboardState extends State<GuruDashboard> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              Navigator.pushReplacement(context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()));
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('saved_user_id');
+              await prefs.remove('saved_username');
+              await prefs.remove('saved_password');
+              if (context.mounted) {
+                Navigator.pushReplacement(context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()));
+              }
             },
             child: const Text("Keluar"),
           ),
@@ -5254,10 +5661,23 @@ class Admin1Dashboard extends StatefulWidget {
   State<Admin1Dashboard> createState() => _Admin1DashboardState();
 }
 
-class _Admin1DashboardState extends State<Admin1Dashboard> {
+class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _tab = 0;
   String _search = "";
   String _filter = "semua";
+
+  @override
+  void initState() {
+    super.initState();
+    startIdleWatcher();
+  }
+
+  @override
+  void dispose() {
+    stopIdleWatcher();
+    super.dispose();
+  }
 
   void _massUpdate(bool aktif) async {
     final s = await FirebaseFirestore.instance
@@ -5282,168 +5702,252 @@ class _Admin1DashboardState extends State<Admin1Dashboard> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFFF1F5F9),
-    body: Row(children: [
-      // Rail
-      NavigationRail(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        labelType: NavigationRailLabelType.all,
-        backgroundColor: const Color(0xFF0F172A),
-        unselectedIconTheme:
-        const IconThemeData(color: Colors.white60),
-        selectedIconTheme:
-        const IconThemeData(color: Colors.white),
-        unselectedLabelTextStyle:
-        const TextStyle(color: Colors.white60, fontSize: 10),
-        selectedLabelTextStyle: const TextStyle(
+    key: _scaffoldKey,
+    backgroundColor: context.bm.surface,
+    drawer: _buildAdminDrawer(),
+    body: StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').snapshots(),
+      builder: (c, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final u = snap.data!.docs.map((d) => UserAccount.fromFirestore(d)).toList();
+        return SafeArea(
+          bottom: false,
+          child: Column(children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
             color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold),
-        destinations: const [
-          NavigationRailDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard),
-              label: Text('Statistik')),
-          NavigationRailDestination(
-              icon: Icon(Icons.add_task_outlined),
-              selectedIcon: Icon(Icons.add_task),
-              label: Text('Upload')),
-          NavigationRailDestination(
-              icon: Icon(Icons.menu_book_outlined),
-              selectedIcon: Icon(Icons.menu_book),
-              label: Text('Mapel')),
-          NavigationRailDestination(
-              icon: Icon(Icons.campaign_outlined),
-              selectedIcon: Icon(Icons.campaign),
-              label: Text('Broadcast')),
-          NavigationRailDestination(
-              icon: Icon(Icons.manage_accounts_outlined),
-              selectedIcon: Icon(Icons.manage_accounts),
-              label: Text('Guru')),
-          NavigationRailDestination(
-              icon: Icon(Icons.groups_outlined),
-              selectedIcon: Icon(Icons.groups),
-              label: Text('Siswa')),
-          NavigationRailDestination(
-              icon: Icon(Icons.history_edu_outlined),
-              selectedIcon: Icon(Icons.history_edu),
-              label: Text('History')),
-          NavigationRailDestination(
-              icon: Icon(Icons.grading_outlined),
-              selectedIcon: Icon(Icons.grading),
-              label: Text('Nilai')),
-          NavigationRailDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: Text('Setting')),
-        ],
-      ),
-
-      // Content
-      Expanded(
-        child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .snapshots(),
-          builder: (c, snap) {
-            if (!snap.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final u = snap.data!.docs
-                .map((d) => UserAccount.fromFirestore(d))
-                .toList();
-            return Column(children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 14),
-                color: Colors.white,
-                child: Row(children: [
-                  const Icon(Icons.admin_panel_settings,
-                      color: Color(0xFF0F172A)),
-                  const SizedBox(width: 10),
-                  Text("Admin: ${widget.admin.nama}",
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  // Badge ujian aktif
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('exam')
-                        .snapshots(),
-                    builder: (c, es) {
-                      if (!es.hasData) return const SizedBox();
-                      final n = es.data!.docs
-                          .map((d) => ExamData.fromFirestore(d))
-                          .where((e) => e.isOngoing)
-                          .length;
-                      if (n == 0) return const SizedBox();
-                      return Container(
-                        margin: const EdgeInsets.only(right: 10),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                            color: Colors.green,
-                            borderRadius:
-                            BorderRadius.circular(20)),
-                        child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                  Icons.fiber_manual_record,
-                                  color: Colors.white,
-                                  size: 8),
-                              const SizedBox(width: 4),
-                              Text("$n Ujian Aktif",
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11)),
-                            ]),
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.logout),
-                    tooltip: "Keluar",
-                    onPressed: () => showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: const Text("Keluar?"),
-                        content: const Text(
-                            "Yakin ingin keluar dari sesi ini?"),
-                        actions: [
-                          TextButton(
-                              onPressed: () =>
-                                  Navigator.pop(context),
-                              child: const Text("Batal")),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                foregroundColor: Colors.white),
-                            onPressed: () {
-                              Navigator.pop(context);
-                              Navigator.pushReplacement(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) =>
-                                      const LoginScreen()));
-                            },
-                            child: const Text("Keluar"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ]),
+            child: Row(children: [
+              IconButton(
+                icon: const Icon(Icons.menu, color: Color(0xFF60A5FA)),
+                tooltip: "Menu",
+                onPressed: () => _scaffoldKey.currentState!.openDrawer(),
               ),
-              Expanded(child: _buildTab(u)),
-            ]);
-          },
-        ),
-      ),
-    ]),
+              Icon(Icons.admin_panel_settings, color: context.bm.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text("Admin: ${widget.admin.nama}",
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              // Badge ujian aktif
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('exam').snapshots(),
+                builder: (c, es) {
+                  if (!es.hasData) return const SizedBox();
+                  final n = es.data!.docs
+                      .map((d) => ExamData.fromFirestore(d))
+                      .where((e) => e.isOngoing)
+                      .length;
+                  if (n == 0) return const SizedBox();
+                  return Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.green, borderRadius: BorderRadius.circular(20)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
+                      const SizedBox(width: 4),
+                      Text("$n Ujian Aktif",
+                          style: const TextStyle(color: Colors.white, fontSize: 11)),
+                    ]),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.logout),
+                tooltip: "Keluar",
+                onPressed: () => showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text("Keluar?"),
+                    content: const Text("Yakin ingin keluar dari sesi ini?"),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("Batal")),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          Navigator.pushReplacement(context,
+                              MaterialPageRoute(builder: (_) => const LoginScreen()));
+                        },
+                        child: const Text("Keluar"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          Expanded(child: GestureDetector(
+            onTap: resetIdleTimer,
+            onPanDown: (_) => resetIdleTimer(),
+            behavior: HitTestBehavior.translucent,
+            child: _buildTab(u),
+          )),
+          ]),
+        );
+      },
+    ),
   );
+
+  // Tab labels for header display
+  static const _tabLabels = [
+    'Statistik', 'Upload Soal', 'Mata Pelajaran', 'Broadcast',
+    'Manaj. Guru', 'Manaj. Siswa', 'History Ujian', 'Rekap Nilai', 'Pengaturan',
+  ];
+
+  Widget _buildAdminDrawer() {
+    Widget _sectionLabel(String text) => Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(text,
+          style: const TextStyle(
+              fontSize: 11, fontWeight: FontWeight.bold,
+              color: Colors.grey, letterSpacing: 0.8)),
+    );
+
+    Widget _item(int tab, IconData icon, String label) => ListTile(
+      leading: Icon(icon, size: 20),
+      title: Text(label, style: const TextStyle(fontSize: 14)),
+      selected: _tab == tab,
+      selectedColor: const Color(0xFF0F172A),
+      selectedTileColor: const Color(0xFF0F172A08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      onTap: () { Navigator.pop(context); setState(() => _tab = tab); },
+    );
+
+    return Drawer(
+      child: Column(children: [
+        // Header
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [context.bm.primary, context.bm.gradient2],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            GestureDetector(
+              onTap: () { Navigator.pop(context); setState(() => _tab = 0); },
+              child: Image.asset('assets/logo.png', width: 56, height: 56),
+            ),
+            const SizedBox(height: 12),
+            Text(widget.admin.nama,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+              child: const Text('Administrator',
+                  style: TextStyle(color: Colors.white70, fontSize: 11)),
+            ),
+          ]),
+        ),
+        // Menu
+        Expanded(
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), children: [
+            // Dashboard
+            ListTile(
+              leading: Image.asset('assets/logo.png', width: 22, height: 22),
+              title: const Text('Dashboard', style: TextStyle(fontSize: 14)),
+              selected: _tab == 0,
+              selectedColor: const Color(0xFF0F172A),
+              selectedTileColor: const Color(0x080F172A),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              onTap: () { Navigator.pop(context); setState(() => _tab = 0); },
+            ),
+            const Divider(height: 8),
+
+            // Group: Monitoring
+            _sectionLabel('MONITORING'),
+            _item(0, Icons.dashboard_outlined, 'Statistik'),
+            _item(7, Icons.grading_outlined, 'Rekap Nilai'),
+            _item(9, Icons.bar_chart_outlined, 'Analitik'),
+            const Divider(height: 8),
+            ListTile(
+              leading: const Icon(Icons.person_outline, size: 20),
+              title: const Text('Profil Saya', style: TextStyle(fontSize: 14)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.admin, canEdit: false),
+                ));
+              },
+            ),
+            const Divider(height: 8),
+
+            // Group: Manajemen Ujian
+            _sectionLabel('MANAJEMEN UJIAN'),
+            _item(1, Icons.add_task_outlined, 'Upload Soal'),
+            _item(2, Icons.menu_book_outlined, 'Mata Pelajaran'),
+            _item(6, Icons.history_edu_outlined, 'History Ujian'),
+            const Divider(height: 8),
+
+            // Group: Pengguna
+            _sectionLabel('PENGGUNA'),
+            _item(4, Icons.manage_accounts_outlined, 'Manaj. Guru'),
+            _item(5, Icons.groups_outlined, 'Manaj. Siswa'),
+            const Divider(height: 8),
+
+            // Group: Sistem
+            _sectionLabel('SISTEM'),
+            _item(3, Icons.campaign_outlined, 'Broadcast'),
+            _item(8, Icons.settings_outlined, 'Pengaturan'),
+            const Divider(height: 8),
+            _buildThemeSwitcher(),
+            const Divider(height: 8),
+
+            // Logout
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red, size: 20),
+              title: const Text('Keluar', style: TextStyle(color: Colors.red, fontSize: 14)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              onTap: () {
+                Navigator.pop(context);
+                showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text("Keluar?"),
+                    content: const Text("Yakin ingin keluar dari sesi ini?"),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal")),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red, foregroundColor: Colors.white),
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.remove('saved_user_id');
+                          await prefs.remove('saved_username');
+                          await prefs.remove('saved_password');
+                          if (context.mounted) {
+                            Navigator.pushReplacement(context,
+                                MaterialPageRoute(builder: (_) => const LoginScreen()));
+                          }
+                        },
+                        child: const Text("Keluar"),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
 
   Widget _buildTab(List<UserAccount> u) {
     switch (_tab) {
@@ -5464,8 +5968,15 @@ class _Admin1DashboardState extends State<Admin1Dashboard> {
         return const ExamHistoryList();
       case 7:
         return const RekapsNilaiScreen();
+      case 9:
+        return const AnalyticsScreen(filterMapel: null);
       default:
-        return _settings(u);
+        return GestureDetector(
+          onTap: resetIdleTimer,
+          onPanDown: (_) => resetIdleTimer(),
+          behavior: HitTestBehavior.translucent,
+          child: _settings(u),
+        );
     }
   }
 
@@ -5863,6 +6374,7 @@ class _Admin1DashboardState extends State<Admin1Dashboard> {
               subtitle: Text(
                   "${g[k[i]]!.length} siswa • ${g[k[i]]!.where((s) => s.statusAktif == 'aktif').length} aktif"),
               children: g[k[i]]!.map((x) => ListTile(
+                onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => ProfilePage(user: x, canEdit: true))); },
                 leading: CircleAvatar(
                     backgroundColor:
                     x.statusAktif == 'aktif'
@@ -6129,7 +6641,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _tokenCtrl = TextEditingController();
   ExamData? _exam;
   bool _loading = true;
@@ -6149,6 +6662,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _startBatteryReporter();
     _listenBroadcast();
     _listenAccountStatus();
+    startIdleWatcher();
   }
 
   // Load ujian realtime pakai Stream agar selalu update
@@ -6302,6 +6816,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    stopIdleWatcher();
     _cam?.dispose();
     _batteryTimer?.cancel();
     _examSub?.cancel();
@@ -6325,10 +6840,16 @@ class _HomeScreenState extends State<HomeScreen> {
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
                 foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              Navigator.pushReplacement(context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()));
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('saved_user_id');
+              await prefs.remove('saved_username');
+              await prefs.remove('saved_password');
+              if (context.mounted) {
+                Navigator.pushReplacement(context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()));
+              }
             },
             child: const Text("Keluar"),
           ),
@@ -6336,6 +6857,68 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  Widget _buildHomeDrawer() {
+    return Drawer(
+      child: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [context.bm.primary, context.bm.gradient2],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Image.asset('assets/logo.png', width: 56, height: 56),
+            ),
+            const SizedBox(height: 12),
+            Text(widget.user.nama,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+              child: Text('Kelas ' + widget.user.kode + ' · Ruang ' + widget.user.ruang,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: ListView(padding: EdgeInsets.zero, children: [
+            ListTile(
+              leading: Image.asset('assets/logo.png', width: 22, height: 22),
+              title: const Text('Dashboard'),
+              onTap: () => Navigator.pop(context),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Profil Saya'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.user, canEdit: false),
+                ));
+              },
+            ),
+            const Divider(height: 1),
+            _buildThemeSwitcher(),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Keluar', style: TextStyle(color: Colors.red)),
+              onTap: () { Navigator.pop(context); _confirmLogout(context); },
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -6358,8 +6941,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
-      body: _loading
+      key: _scaffoldKey,
+      backgroundColor: context.bm.surface,
+      drawer: _buildHomeDrawer(),
+      body: GestureDetector(
+        onTap: resetIdleTimer,
+        onPanDown: (_) => resetIdleTimer(),
+        behavior: HitTestBehavior.translucent,
+        child: _loading
           ? const Center(child: CircularProgressIndicator())
           : Stack(children: [
         // Header gradient
@@ -6369,9 +6958,9 @@ class _HomeScreenState extends State<HomeScreen> {
           right: 0,
           height: 230,
           child: Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF0F172A), Color(0xFF1E3A5F)],
+                colors: [context.bm.primary, context.bm.gradient2],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -6383,8 +6972,13 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(children: [
             // Header bar
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
+              padding: const EdgeInsets.fromLTRB(4, 12, 8, 0),
               child: Row(children: [
+                IconButton(
+                  icon: const Icon(Icons.menu, color: Color(0xFF60A5FA)),
+                  tooltip: "Menu",
+                  onPressed: () => _scaffoldKey.currentState!.openDrawer(),
+                ),
                 Expanded(
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -6837,6 +7431,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
       ]),
+      ),
     );
   }
 
@@ -9380,6 +9975,78 @@ Widget _buildTextWithLatex(String text, double fontSize) {
 }
 
 // ============================================================
+// GLOBAL THEME SWITCHER WIDGET
+// ============================================================
+Widget _buildThemeSwitcher() {
+  return StatefulBuilder(
+    builder: (ctx, setSt) {
+      final themes = BMTheme.values;
+      final themeColors = {
+        BMTheme.navy:   const Color(0xFF0F172A),
+        BMTheme.dark:   const Color(0xFF1E293B),
+        BMTheme.ocean:  const Color(0xFF0369A1),
+        BMTheme.forest: const Color(0xFF166534),
+        BMTheme.purple: const Color(0xFF6B21A8),
+        BMTheme.rose:   const Color(0xFF9F1239),
+      };
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(children: [
+              Icon(Icons.palette_outlined, size: 16, color: Colors.grey),
+              SizedBox(width: 6),
+              Text('Tema Aplikasi', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+            ]),
+            const SizedBox(height: 8),
+            ValueListenableBuilder<BMTheme>(
+              valueListenable: _themeNotifier,
+              builder: (_, current, __) => Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: themes.map((t) {
+                  final isSelected = current == t;
+                  return GestureDetector(
+                    onTap: () async {
+                      _themeNotifier.value = t;
+                      setSt(() {});
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('app_theme', t.name);
+                    },
+                    child: Tooltip(
+                      message: BMThemePresets.name(t),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: themeColors[t],
+                          shape: BoxShape.circle,
+                          border: isSelected
+                              ? Border.all(color: Colors.white, width: 3)
+                              : Border.all(color: Colors.transparent, width: 2),
+                          boxShadow: isSelected
+                              ? [BoxShadow(color: themeColors[t]!.withValues(alpha: 0.6), blurRadius: 6, spreadRadius: 1)]
+                              : null,
+                        ),
+                        child: isSelected
+                            ? const Icon(Icons.check, color: Colors.white, size: 14)
+                            : null,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+
+// ============================================================
 // PASSWORD RESET WIDGET
 // ============================================================
 class PasswordResetWidget extends StatefulWidget {
@@ -9573,4 +10240,667 @@ class _PasswordResetWidgetState extends State<PasswordResetWidget> {
           ),
         ],
       ]);
+}
+
+// ============================================================
+// PROFILE PAGE
+// ============================================================
+class ProfilePage extends StatefulWidget {
+  final UserAccount user;
+  final bool canEdit; // true if admin editing another user
+
+  const ProfilePage({super.key, required this.user, required this.canEdit});
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  final _namaCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final _ruangCtrl = TextEditingController();
+  bool _saving = false;
+  bool _obscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _namaCtrl.text = widget.user.nama;
+    _ruangCtrl.text = widget.user.ruang;
+  }
+
+  @override
+  void dispose() {
+    _namaCtrl.dispose();
+    _passCtrl.dispose();
+    _ruangCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_namaCtrl.text.trim().isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final updates = <String, dynamic>{
+        'nama': _namaCtrl.text.trim(),
+        'ruang': _ruangCtrl.text.trim(),
+      };
+      if (_passCtrl.text.trim().isNotEmpty) {
+        updates['password'] = _passCtrl.text.trim();
+      }
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.user.id)
+          .update(updates);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Profil berhasil disimpan!'),
+          backgroundColor: Colors.green,
+        ));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Gagal menyimpan: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+    setState(() => _saving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = widget.user;
+    final roleColors = {
+      'admin1': Colors.purple,
+      'guru': Colors.teal,
+      'siswa': Colors.blue,
+    };
+    final roleLabels = {
+      'admin1': 'Administrator',
+      'guru': 'Guru',
+      'siswa': 'Siswa',
+    };
+    final roleColor = roleColors[u.role] ?? Colors.grey;
+    final roleLabel = roleLabels[u.role] ?? u.role;
+
+    return Scaffold(
+      backgroundColor: context.bm.surface,
+      appBar: AppBar(
+        backgroundColor: context.bm.primary,
+        foregroundColor: Colors.white,
+        title: Text(widget.canEdit ? 'Edit Profil: ${u.nama}' : 'Profil Saya'),
+        actions: [
+          if (widget.canEdit)
+            TextButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.save, color: Colors.white),
+              label: const Text('Simpan', style: TextStyle(color: Colors.white)),
+            ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            // Avatar Card
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 44,
+                      backgroundColor: context.bm.primary,
+                      child: Text(u.initials,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(u.nama,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('@${u.username}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: roleColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(roleLabel,
+                          style: TextStyle(
+                              color: roleColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Info Card
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Informasi Akun',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    const Divider(height: 20),
+                    _infoRow(Icons.person, 'Username', u.username),
+                    _infoRow(Icons.badge, 'Role', roleLabel),
+                    if (u.role == 'siswa') ...[
+                      _infoRow(Icons.class_, 'Kelas', u.kode),
+                      _infoRow(Icons.meeting_room, 'Ruang', u.ruang),
+                    ],
+                    if (u.role == 'guru') ...[
+                      _mapelSection(u.id),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Edit Form (if canEdit)
+            if (widget.canEdit) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Edit Data',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      const Divider(height: 20),
+                      TextField(
+                        controller: _namaCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Nama Lengkap',
+                          prefixIcon: Icon(Icons.person_outline),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _ruangCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Ruang',
+                          prefixIcon: Icon(Icons.meeting_room_outlined),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _passCtrl,
+                        obscureText: _obscure,
+                        decoration: InputDecoration(
+                          labelText: 'Password Baru (kosongkan jika tidak diubah)',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                            onPressed: () => setState(() => _obscure = !_obscure),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: context.bm.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: _saving ? null : _save,
+                          icon: _saving
+                              ? const SizedBox(width: 18, height: 18,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.save),
+                          label: const Text('SIMPAN PERUBAHAN'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey),
+        const SizedBox(width: 12),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2),
+        ),
+      ],
+    ),
+  );
+
+  Widget _mapelSection(String userId) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(userId).snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) return const SizedBox();
+        final data = snap.data!.data() as Map<String, dynamic>?;
+        final rawMapel = data?['mapelRoles'];
+        final mapels = rawMapel is List
+            ? List<String>.from(rawMapel.map((e) => e.toString()))
+            : <String>[];
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Icon(Icons.book_outlined, size: 18, color: Colors.grey),
+              SizedBox(width: 12),
+              Text('Mata Pelajaran', style: TextStyle(color: Colors.grey, fontSize: 13)),
+            ]),
+            const SizedBox(height: 8),
+            if (mapels.isEmpty)
+              const Text('Belum ada mapel', style: TextStyle(color: Colors.orange))
+            else
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: mapels.map((m) => Chip(
+                  label: Text(m, style: const TextStyle(fontSize: 12)),
+                  backgroundColor: Colors.teal.withValues(alpha: 0.1),
+                  side: const BorderSide(color: Colors.teal),
+                )).toList(),
+              ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+// ============================================================
+// ANALYTICS SCREEN
+// ============================================================
+class AnalyticsScreen extends StatefulWidget {
+  final Set<String>? filterMapel; // null = admin (semua), Set = guru (filter)
+
+  const AnalyticsScreen({super.key, required this.filterMapel});
+
+  @override
+  State<AnalyticsScreen> createState() => _AnalyticsScreenState();
+}
+
+class _AnalyticsScreenState extends State<AnalyticsScreen> {
+  List<ExamData> _exams = [];
+  bool _loading = true;
+  String? _selectedExamId;
+
+  // Distribution data
+  Map<String, int> _distrib = {'A': 0, 'B': 0, 'C': 0, 'D': 0};
+  bool _loadingDist = false;
+
+  // Average per mapel
+  Map<String, double> _avgPerMapel = {};
+  bool _loadingAvg = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExams();
+  }
+
+  void _loadExams() async {
+    setState(() => _loading = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('exam')
+          .orderBy('waktuMulai', descending: true)
+          .limit(60)
+          .get();
+
+      final List<ExamData> exams = [];
+      for (final d in snap.docs) {
+        final data = d.data() as Map<String, dynamic>;
+        final mode = data['mode']?.toString() ?? '';
+        if (mode == 'native') {
+          exams.add(ExamData.fromFirestore(d));
+        } else if (mode.isEmpty) {
+          final soalSnap = await FirebaseFirestore.instance
+              .collection('exam').doc(d.id).collection('soal').limit(1).get();
+          if (soalSnap.docs.isNotEmpty) exams.add(ExamData.fromFirestore(d));
+        }
+      }
+
+      var filtered = exams;
+      if (widget.filterMapel != null && widget.filterMapel!.isNotEmpty) {
+        filtered = exams.where((e) => widget.filterMapel!.contains(e.mapel)).toList();
+      }
+      setState(() { _exams = filtered; _loading = false; });
+      _loadAvgPerMapel(filtered);
+    } catch (e) {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _loadAvgPerMapel(List<ExamData> exams) async {
+    setState(() => _loadingAvg = true);
+    final Map<String, List<double>> mapelScores = {};
+
+    for (final exam in exams) {
+      try {
+        final soalSnap = await FirebaseFirestore.instance
+            .collection('exam').doc(exam.id).collection('soal')
+            .orderBy('nomor').get();
+        if (soalSnap.docs.isEmpty) continue;
+        final soals = soalSnap.docs
+            .map((d) => SoalModel.fromMap(d.data() as Map<String, dynamic>, d.id))
+            .toList();
+        final totalSkor = soals.fold<int>(0, (s, q) => s + q.skor);
+        if (totalSkor == 0) continue;
+
+        final jwbSnap = await FirebaseFirestore.instance
+            .collection('exam').doc(exam.id).collection('jawaban').get();
+        if (jwbSnap.docs.isEmpty) continue;
+
+        for (final jwbDoc in jwbSnap.docs) {
+          final jwbData = jwbDoc.data() as Map<String, dynamic>;
+          final jawaban = jwbData['jawaban'] as Map<String, dynamic>? ?? {};
+          int perolehan = 0;
+          for (final soal in soals) {
+            if (jawaban[soal.id]?.toString() == soal.kunciJawaban) {
+              perolehan += soal.skor;
+            }
+          }
+          mapelScores.putIfAbsent(exam.mapel, () => [])
+              .add(perolehan / totalSkor * 100);
+        }
+      } catch (_) {}
+    }
+
+    final Map<String, double> avg = {};
+    for (final entry in mapelScores.entries) {
+      if (entry.value.isNotEmpty) {
+        avg[entry.key] = entry.value.reduce((a, b) => a + b) / entry.value.length;
+      }
+    }
+    setState(() { _avgPerMapel = avg; _loadingAvg = false; });
+  }
+
+  void _loadDistribution(String examId) async {
+    setState(() { _loadingDist = true; _distrib = {'A': 0, 'B': 0, 'C': 0, 'D': 0}; });
+    try {
+      final soalSnap = await FirebaseFirestore.instance
+          .collection('exam').doc(examId).collection('soal')
+          .orderBy('nomor').get();
+      final soals = soalSnap.docs
+          .map((d) => SoalModel.fromMap(d.data() as Map<String, dynamic>, d.id))
+          .toList();
+      final totalSkor = soals.fold<int>(0, (s, q) => s + q.skor);
+      if (totalSkor == 0) { setState(() => _loadingDist = false); return; }
+
+      final jwbSnap = await FirebaseFirestore.instance
+          .collection('exam').doc(examId).collection('jawaban').get();
+
+      final Map<String, int> dist = {'A': 0, 'B': 0, 'C': 0, 'D': 0};
+      for (final jwbDoc in jwbSnap.docs) {
+        final jwbData = jwbDoc.data() as Map<String, dynamic>;
+        final jawaban = jwbData['jawaban'] as Map<String, dynamic>? ?? {};
+        int perolehan = 0;
+        for (final soal in soals) {
+          if (jawaban[soal.id]?.toString() == soal.kunciJawaban) perolehan += soal.skor;
+        }
+        final nilai = perolehan / totalSkor * 100;
+        if (nilai >= 90) dist['A'] = dist['A']! + 1;
+        else if (nilai >= 75) dist['B'] = dist['B']! + 1;
+        else if (nilai >= 60) dist['C'] = dist['C']! + 1;
+        else dist['D'] = dist['D']! + 1;
+      }
+      setState(() { _distrib = dist; _loadingDist = false; });
+    } catch (_) {
+      setState(() => _loadingDist = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Title
+        Row(children: [
+          Icon(Icons.analytics_outlined, color: context.bm.primary),
+          const SizedBox(width: 8),
+          Text('Analitik Ujian',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold,
+                  color: context.bm.primary)),
+          if (widget.filterMapel != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Chip(
+                label: Text(widget.filterMapel!.join(', '),
+                    style: const TextStyle(fontSize: 10)),
+                backgroundColor: Colors.teal.withValues(alpha: 0.1),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 16),
+
+        // ── Chart 1: Distribusi Nilai ──
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Distribusi Nilai',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              const Text('Pilih ujian untuk melihat distribusi nilai siswa',
+                  style: TextStyle(color: Colors.grey, fontSize: 11)),
+              const SizedBox(height: 12),
+              if (_exams.isEmpty)
+                const Text('Tidak ada ujian tersedia', style: TextStyle(color: Colors.grey))
+              else
+                DropdownButtonFormField<String>(
+                  value: _selectedExamId,
+                  decoration: InputDecoration(
+                    labelText: 'Pilih Ujian',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                  items: _exams.map((e) => DropdownMenuItem(
+                    value: e.id,
+                    child: Text(
+                      '${e.mapel} - ${e.judul}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  )).toList(),
+                  onChanged: (val) {
+                    setState(() => _selectedExamId = val);
+                    if (val != null) _loadDistribution(val);
+                  },
+                ),
+              const SizedBox(height: 16),
+              if (_selectedExamId == null)
+                const Center(
+                    child: Text('Pilih ujian di atas',
+                        style: TextStyle(color: Colors.grey)))
+              else if (_loadingDist)
+                const Center(child: CircularProgressIndicator())
+              else ...[
+                LayoutBuilder(builder: (ctx, constraints) => SizedBox(
+                  height: (MediaQuery.of(ctx).size.height * 0.25).clamp(160.0, 220.0),
+                  child: BarChart(BarChartData(
+                    alignment: BarChartAlignment.spaceAround,
+                    maxY: (_distrib.values.fold<int>(0, (a, b) => a > b ? a : b) + 2).toDouble(),
+                    barGroups: [
+                      _barGroup(0, _distrib['A']!.toDouble(), Colors.green),
+                      _barGroup(1, _distrib['B']!.toDouble(), Colors.blue),
+                      _barGroup(2, _distrib['C']!.toDouble(), Colors.orange),
+                      _barGroup(3, _distrib['D']!.toDouble(), Colors.red),
+                    ],
+                    titlesData: FlTitlesData(
+                      bottomTitles: AxisTitles(sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (val, _) {
+                          const labels = ['A (≥90)', 'B (75-89)', 'C (60-74)', 'D (<60)'];
+                          if (val.toInt() < 0 || val.toInt() >= labels.length) return const SizedBox();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(labels[val.toInt()], style: const TextStyle(fontSize: 9)),
+                          );
+                        },
+                      )),
+                      leftTitles: AxisTitles(sideTitles: SideTitles(
+                        showTitles: true, reservedSize: 28,
+                        getTitlesWidget: (val, _) =>
+                            Text(val.toInt().toString(), style: const TextStyle(fontSize: 10)),
+                      )),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    gridData: const FlGridData(show: true),
+                    borderData: FlBorderData(show: false),
+                  )),
+                )),
+                const SizedBox(height: 8),
+                Wrap(spacing: 12, children: [
+                  _legend('A ≥90', Colors.green, _distrib['A']!),
+                  _legend('B 75-89', Colors.blue, _distrib['B']!),
+                  _legend('C 60-74', Colors.orange, _distrib['C']!),
+                  _legend('D <60', Colors.red, _distrib['D']!),
+                ]),
+              ],
+            ]),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ── Chart 2: Rata-rata per Mapel ──
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Rata-rata Nilai per Mata Pelajaran',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              const Text('Berdasarkan semua ujian yang sudah memiliki jawaban',
+                  style: TextStyle(color: Colors.grey, fontSize: 11)),
+              const SizedBox(height: 16),
+              if (_loadingAvg)
+                const Center(child: CircularProgressIndicator())
+              else if (_avgPerMapel.isEmpty)
+                const Center(
+                    child: Text('Belum ada data nilai',
+                        style: TextStyle(color: Colors.grey)))
+              else ...[
+                SizedBox(
+                  height: (_avgPerMapel.length * 48 + 32).toDouble().clamp(120.0, 360.0),
+                  child: BarChart(BarChartData(
+                    alignment: BarChartAlignment.spaceAround,
+                    maxY: 100,
+                    barGroups: _avgPerMapel.entries.toList().asMap().entries.map((e) =>
+                        BarChartGroupData(
+                          x: e.key,
+                          barRods: [BarChartRodData(
+                            toY: e.value.value,
+                            color: context.bm.primary,
+                            width: 16,
+                            borderRadius: BorderRadius.circular(4),
+                          )],
+                        )).toList(),
+                    titlesData: FlTitlesData(
+                      leftTitles: AxisTitles(sideTitles: SideTitles(
+                        showTitles: true, reservedSize: 68,
+                        getTitlesWidget: (val, _) {
+                          final keys = _avgPerMapel.keys.toList();
+                          if (val.toInt() < 0 || val.toInt() >= keys.length) return const SizedBox();
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Text(
+                                keys[val.toInt()].length > 10
+                                    ? keys[val.toInt()].substring(0, 9) + '...'
+                                    : keys[val.toInt()],
+                                style: const TextStyle(fontSize: 9),
+                                textAlign: TextAlign.right,
+                                overflow: TextOverflow.ellipsis),
+                          );
+                        },
+                      )),
+                      bottomTitles: AxisTitles(sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (val, _) =>
+                            Text(val.toInt().toString(), style: const TextStyle(fontSize: 9)),
+                      )),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    gridData: const FlGridData(show: true),
+                    borderData: FlBorderData(show: false),
+                  )),
+                ),
+                const SizedBox(height: 12),
+                ...(_avgPerMapel.entries.toList()
+                      ..sort((a, b) => b.value.compareTo(a.value)))
+                    .map((e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(children: [
+                    Expanded(child: Text(e.key, style: const TextStyle(fontSize: 13))),
+                    Text(e.value.toStringAsFixed(1),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: e.value >= 75
+                                ? Colors.green
+                                : e.value >= 60 ? Colors.orange : Colors.red)),
+                  ]),
+                )),
+              ],
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  BarChartGroupData _barGroup(int x, double y, Color color) =>
+      BarChartGroupData(
+        x: x,
+        barRods: [BarChartRodData(
+          toY: y,
+          color: color,
+          width: 30,
+          borderRadius: BorderRadius.circular(4),
+        )],
+      );
+
+  Widget _legend(String label, Color color, int count) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(width: 12, height: 12,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
+      const SizedBox(width: 4),
+      Text('$label: $count', style: const TextStyle(fontSize: 11)),
+    ],
+  );
 }
