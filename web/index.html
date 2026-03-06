@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder used by the build system.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <!-- ========== PWA Meta Tags ========== -->
+  <meta name="description" content="BM Exam - Sistem Ujian Online dengan fitur anti-kecurangan canggih">
+  <meta name="theme-color" content="#1976D2">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BM Exam">
+  <meta name="application-name" content="BM Exam">
+  <meta name="msapplication-TileColor" content="#1976D2">
+  <meta name="msapplication-TileImage" content="icons/Icon-192.png">
+
+  <!-- ========== Open Graph ========== -->
+  <meta property="og:title" content="BM Exam - Sistem Ujian Online">
+  <meta property="og:description" content="Aplikasi ujian online dengan fitur anti-kecurangan canggih">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="icons/Icon-512.png">
+
+  <!-- ========== Icons ========== -->
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/Icon-512.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <!-- ========== Web App Manifest ========== -->
+  <link rel="manifest" href="manifest.json">
+
+  <title>BM Exam</title>
+  <link rel="stylesheet" type="text/css" href="flutter_bootstrap.js">
+
+  <style>
+    /* Splash screen saat Flutter loading */
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #1976D2;
+      overflow: hidden;
+    }
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1565C0 0%, #1976D2 50%, #42A5F5 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      transition: opacity 0.5s ease-out;
+    }
+    #splash-screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #splash-icon {
+      width: 120px;
+      height: 120px;
+      border-radius: 24px;
+      background: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      margin-bottom: 24px;
+    }
+    #splash-icon img {
+      width: 80px;
+      height: 80px;
+      object-fit: contain;
+    }
+    #splash-title {
+      color: white;
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      font-size: 28px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+    #splash-subtitle {
+      color: rgba(255,255,255,0.8);
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      font-size: 14px;
+    }
+    #splash-loader {
+      margin-top: 40px;
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255,255,255,0.3);
+      border-top: 4px solid white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* PWA Install Banner */
+    #pwa-install-banner {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      display: none;
+      align-items: center;
+      gap: 12px;
+      z-index: 1000;
+      max-width: 380px;
+      width: calc(100% - 40px);
+      animation: slideUp 0.3s ease-out;
+    }
+    #pwa-install-banner.show { display: flex; }
+    @keyframes slideUp {
+      from { transform: translateX(-50%) translateY(100px); opacity: 0; }
+      to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+    #pwa-install-banner img {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+    }
+    #pwa-install-banner .text { flex: 1; }
+    #pwa-install-banner .text strong {
+      display: block;
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      font-size: 14px;
+      color: #1976D2;
+      margin-bottom: 2px;
+    }
+    #pwa-install-banner .text span {
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      font-size: 12px;
+      color: #666;
+    }
+    #pwa-install-btn {
+      background: #1976D2;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #pwa-dismiss-btn {
+      background: none;
+      border: none;
+      color: #999;
+      cursor: pointer;
+      font-size: 18px;
+      padding: 4px;
+      line-height: 1;
+    }
+
+    /* Offline indicator */
+    #offline-indicator {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #f44336;
+      color: white;
+      text-align: center;
+      padding: 8px;
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      font-size: 13px;
+      z-index: 9998;
+      display: none;
+    }
+    #offline-indicator.show { display: block; }
+  </style>
+</head>
+<body>
+  <!-- Offline Indicator -->
+  <div id="offline-indicator">
+    ⚠️ Tidak ada koneksi internet. Beberapa fitur mungkin tidak tersedia.
+  </div>
+
+  <!-- Splash Screen -->
+  <div id="splash-screen">
+    <div id="splash-icon">
+      <img src="icons/Icon-192.png" alt="BM Exam" onerror="this.style.display='none'">
+    </div>
+    <div id="splash-title">BM EXAM</div>
+    <div id="splash-subtitle">Sistem Ujian Online</div>
+    <div id="splash-loader"></div>
+  </div>
+
+  <!-- PWA Install Banner -->
+  <div id="pwa-install-banner">
+    <img src="icons/Icon-192.png" alt="BM Exam">
+    <div class="text">
+      <strong>Install BM Exam</strong>
+      <span>Tambahkan ke layar utama untuk akses cepat</span>
+    </div>
+    <button id="pwa-install-btn">Install</button>
+    <button id="pwa-dismiss-btn">✕</button>
+  </div>
+
+  <script>
+    // ============================================================
+    // Service Worker Registration
+    // ============================================================
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', async () => {
+        try {
+          const registration = await navigator.serviceWorker.register('/sw.js', {
+            scope: '/'
+          });
+          console.log('[App] Service Worker registered:', registration.scope);
+
+          // Cek update SW
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('[App] New service worker available');
+                // Bisa tampilkan notifikasi update jika diperlukan
+              }
+            });
+          });
+        } catch (error) {
+          console.error('[App] Service Worker registration failed:', error);
+        }
+      });
+    }
+
+    // ============================================================
+    // PWA Install Prompt
+    // ============================================================
+    let deferredPrompt = null;
+    const installBanner = document.getElementById('pwa-install-banner');
+    const installBtn = document.getElementById('pwa-install-btn');
+    const dismissBtn = document.getElementById('pwa-dismiss-btn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      
+      // Tampilkan banner setelah 3 detik
+      setTimeout(() => {
+        if (!localStorage.getItem('pwa-dismissed')) {
+          installBanner.classList.add('show');
+        }
+      }, 3000);
+    });
+
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      installBanner.classList.remove('show');
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log('[App] PWA install outcome:', outcome);
+      deferredPrompt = null;
+    });
+
+    dismissBtn.addEventListener('click', () => {
+      installBanner.classList.remove('show');
+      localStorage.setItem('pwa-dismissed', '1');
+    });
+
+    window.addEventListener('appinstalled', () => {
+      console.log('[App] PWA installed successfully');
+      installBanner.classList.remove('show');
+      deferredPrompt = null;
+    });
+
+    // ============================================================
+    // Online/Offline Detection
+    // ============================================================
+    const offlineIndicator = document.getElementById('offline-indicator');
+
+    function updateOnlineStatus() {
+      if (!navigator.onLine) {
+        offlineIndicator.classList.add('show');
+      } else {
+        offlineIndicator.classList.remove('show');
+      }
+    }
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    updateOnlineStatus();
+
+    // ============================================================
+    // Hide Splash Screen setelah Flutter siap
+    // ============================================================
+    window.addEventListener('flutter-first-frame', () => {
+      const splash = document.getElementById('splash-screen');
+      splash.classList.add('hidden');
+      setTimeout(() => {
+        if (splash.parentNode) splash.parentNode.removeChild(splash);
+      }, 500);
+    });
+
+    // Fallback: hide splash setelah 10 detik
+    setTimeout(() => {
+      const splash = document.getElementById('splash-screen');
+      if (splash) splash.classList.add('hidden');
+    }, 10000);
+  </script>
+
+  <!-- Kiosk Mode -->
+  <script src="kiosk.js"></script>
+
+  <script>
+    // ============================================================
+    // Flutter ↔ JS Bridge untuk Kiosk Mode
+    // Flutter memanggil: BMKiosk.start / stop lewat js package
+    // ============================================================
+
+    // Dengarkan event pelanggaran dari kiosk.js dan teruskan ke Flutter
+    window.addEventListener('bm-kiosk-violation', (e) => {
+      const { count, max, reason } = e.detail;
+      // Kirim ke Flutter app via flutter_js / js interop
+      if (window._bmExamOnViolation) {
+        window._bmExamOnViolation(count, max, reason);
+      }
+    });
+
+    window.addEventListener('bm-kiosk-autosubmit', (e) => {
+      if (window._bmExamOnAutoSubmit) {
+        window._bmExamOnAutoSubmit(e.detail.reason);
+      }
+    });
+  </script>
+
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

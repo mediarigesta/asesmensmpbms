@@ -1,0 +1,9 @@
+name: My Config
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Claude Sonnet 4.6
+    provider: openrouter
+    model: anthropic/claude-sonnet-4-6
+    apiKey: sk-or-v1-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
