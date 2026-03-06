@@ -5,7 +5,10 @@
       "Bash(where:*)",
       "Bash(node:*)",
       "Bash(flutter analyze:*)",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "Bash(timeout /t 30:*)",
+      "Bash(taskkill:*)",
+      "Bash(flutter clean:*)"
     ]
   }
 }

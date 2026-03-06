@@ -439,21 +439,28 @@ class KioskService {
   static const _channel    = MethodChannel('com.bmsexam/kiosk');
   static const _winChannel = MethodChannel('com.bmsexam/windows_security');
 
+  /// True jika Device Admin (Android) atau Guided Access/AAC aktif (iOS)
   static Future<bool> isAdminActive() async {
-    if (kIsWeb || isWindows) return false; // iOS tetap jalan (Guided Access)
+    if (kIsWeb || isWindows) return false;
     try { return await _channel.invokeMethod('isAdminActive') ?? false; }
+    catch (_) { return false; }
+  }
+
+  /// True jika Device Owner (Android Lock Task penuh) atau AAC session aktif (iOS)
+  static Future<bool> isDeviceOwner() async {
+    if (kIsWeb || isWindows) return false;
+    try { return await _channel.invokeMethod('isDeviceOwner') ?? false; }
     catch (_) { return false; }
   }
 
   static Future<void> start({int maxCurang = 3, String examTitle = 'Ujian'}) async {
     if (kIsWeb) {
-      // Panggil web_kiosk_impl.dart (di-compile hanya saat build web)
       webKioskStart(maxCurang, examTitle);
       return;
     }
-    if (isAndroid) {
+    if (isAndroid || (!kIsWeb && Platform.isIOS)) {
       try { await _channel.invokeMethod('startKiosk'); }
-      catch (e) { debugPrint('KioskService.start (Android) error: $e'); }
+      catch (e) { debugPrint('KioskService.start error: $e'); }
     } else if (isWindows) {
       try { await _winChannel.invokeMethod('enableKiosk'); }
       catch (e) { debugPrint('KioskService.start (Windows) error: $e'); }
@@ -465,9 +472,9 @@ class KioskService {
       webKioskStop();
       return;
     }
-    if (isAndroid) {
+    if (isAndroid || (!kIsWeb && Platform.isIOS)) {
       try { await _channel.invokeMethod('stopKiosk'); }
-      catch (e) { debugPrint('KioskService.stop (Android) error: $e'); }
+      catch (e) { debugPrint('KioskService.stop error: $e'); }
     } else if (isWindows) {
       try { await _winChannel.invokeMethod('disableKiosk'); }
       catch (e) { debugPrint('KioskService.stop (Windows) error: $e'); }
@@ -492,6 +499,436 @@ class KioskService {
   }
 }
 
+// ============================================================
+// GROQ AI PARSER — Parse soal dari docx format bebas via Groq API
+// API Key disimpan di Firestore: settings/app_config.groq_api_key
+// ============================================================
+class GroqAiParser {
+  static const _endpoint = 'https://api.groq.com/openai/v1/chat/completions';
+  static const _model    = 'llama-3.3-70b-versatile';
+
+  /// Ekstrak teks terstruktur dari .docx dengan penanda khusus:
+  /// - [JAWABAN] di awal baris = teks berwarna merah (kunci jawaban)
+  /// - [GAMBAR_N] = posisi gambar ke-N
+  /// - [EQ: ...] = persamaan matematika (OMML)
+  /// - ^{...} / _{...} = superscript / subscript inline
+  static ({String text, Map<String, String> images})
+      extractStructured(Uint8List bytes) {
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      // ── Baca relasi gambar dari word/_rels/document.xml.rels ──────
+      final rIdToBase64 = <String, String>{};
+      final relsFile = archive.findFile('word/_rels/document.xml.rels');
+      if (relsFile != null) {
+        final relsXml = utf8.decode(relsFile.content as List<int>);
+        final relReg  = RegExp(
+          r'<Relationship[^>]+Id="([^"]+)"[^>]+Type="[^"]*image[^"]*"[^>]+Target="([^"]+)"',
+        );
+        for (final m in relReg.allMatches(relsXml)) {
+          final rId    = m.group(1)!;
+          final target = m.group(2)!;
+          final imgFile = archive.findFile('word/$target');
+          if (imgFile != null) {
+            rIdToBase64[rId] = base64Encode(imgFile.content as List<int>);
+          }
+        }
+      }
+
+      // ── Parse word/numbering.xml ──────────────────────────────────
+      // numId → ilvl → (format, lvlText)
+      final numDefs = <String, Map<int, (String, String)>>{};
+      final numXmlFile = archive.findFile('word/numbering.xml');
+      if (numXmlFile != null) {
+        final numXml = utf8.decode(numXmlFile.content as List<int>);
+        // abstractNum definitions
+        final abNumMap = <String, Map<int, (String, String)>>{};
+        final abNumReg = RegExp(
+            r'<w:abstractNum w:abstractNumId="(\d+)"[^>]*>(.*?)</w:abstractNum>',
+            dotAll: true);
+        for (final ab in abNumReg.allMatches(numXml)) {
+          final abId   = ab.group(1)!;
+          final abBody = ab.group(2)!;
+          final levels = <int, (String, String)>{};
+          final lvlReg = RegExp(
+              r'<w:lvl w:ilvl="(\d+)"[^>]*>(.*?)</w:lvl>', dotAll: true);
+          for (final lvl in lvlReg.allMatches(abBody)) {
+            final ilvl    = int.parse(lvl.group(1)!);
+            final lvlBody = lvl.group(2)!;
+            final fmt  = RegExp(r'<w:numFmt w:val="([^"]+)"')
+                             .firstMatch(lvlBody)?.group(1) ?? 'decimal';
+            final txt  = RegExp(r'<w:lvlText w:val="([^"]*)"')
+                             .firstMatch(lvlBody)?.group(1) ?? '%1.';
+            levels[ilvl] = (fmt, txt);
+          }
+          abNumMap[abId] = levels;
+        }
+        // numId → abstractNumId
+        final numReg = RegExp(
+            r'<w:num w:numId="(\d+)"[^>]*>.*?<w:abstractNumId w:val="(\d+)"',
+            dotAll: true);
+        for (final num in numReg.allMatches(numXml)) {
+          final nid = num.group(1)!;
+          final abId = num.group(2)!;
+          if (abNumMap.containsKey(abId)) numDefs[nid] = abNumMap[abId]!;
+        }
+      }
+      // Counter per numId → ilvl
+      final numCounters = <String, Map<int, int>>{};
+
+      // ── Parse paragraf dokumen ─────────────────────────────────────
+      final xmlFile = archive.findFile('word/document.xml');
+      if (xmlFile == null) return (text: '', images: {});
+      final xml = utf8.decode(xmlFile.content as List<int>);
+
+      final paraReg  = RegExp(r'<w:p[ >].*?</w:p>', dotAll: true);
+      final runReg   = RegExp(r'<w:r[ >].*?</w:r>', dotAll: true);
+      final tReg     = RegExp(r'<w:t[^>]*>(.*?)</w:t>', dotAll: true);
+      final embedReg = RegExp(r'r:embed="([^"]+)"');
+      final numPrReg = RegExp(
+          r'<w:numPr>.*?<w:ilvl w:val="(\d+)".*?<w:numId w:val="(\d+)".*?</w:numPr>',
+          dotAll: true);
+
+      final buf       = StringBuffer();
+      final namedImgs = <String, String>{}; // 'GAMBAR_1' → base64
+      int   imgCount  = 0;
+
+      for (final para in paraReg.allMatches(xml)) {
+        final pXml    = para.group(0)!;
+        final lineBuf = StringBuffer();
+        bool  hasRed  = false;
+
+        // ── Numbering (Word list format) ──────────────────────────
+        String numPrefix = '';
+        final numPrMatch = numPrReg.firstMatch(pXml);
+        if (numPrMatch != null) {
+          final ilvl  = int.parse(numPrMatch.group(1)!);
+          final numId = numPrMatch.group(2)!;
+          if (numId != '0') {
+            numCounters.putIfAbsent(numId, () => {});
+            final ctrs = numCounters[numId]!;
+            // Reset level lebih dalam saat naik ke level atas
+            ctrs.keys.where((k) => k > ilvl).toList().forEach(ctrs.remove);
+            ctrs[ilvl] = (ctrs[ilvl] ?? 0) + 1;
+            final count = ctrs[ilvl]!;
+            if (numDefs.containsKey(numId) &&
+                numDefs[numId]!.containsKey(ilvl)) {
+              final (fmt, lvlTxt) = numDefs[numId]![ilvl]!;
+              final numStr = _formatListNum(count, fmt);
+              // lvlText biasanya "%1." → ganti %N dengan angka
+              numPrefix = lvlTxt.replaceAll('%${ilvl + 1}', numStr);
+              // Tambah indentasi sesuai level
+              numPrefix = '  ' * ilvl + numPrefix + ' ';
+            } else {
+              numPrefix = '  ' * ilvl + '$count. ';
+            }
+          }
+        }
+
+        // ── Gambar ────────────────────────────────────────────────
+        if (pXml.contains('r:embed=')) {
+          for (final em in embedReg.allMatches(pXml)) {
+            final rId = em.group(1)!;
+            if (rIdToBase64.containsKey(rId)) {
+              imgCount++;
+              final key = 'GAMBAR_$imgCount';
+              namedImgs[key] = rIdToBase64[rId]!;
+              lineBuf.write('[$key] ');
+              break; // satu gambar per paragraf
+            }
+          }
+        }
+
+        // ── Ganti OMML inline dengan placeholder agar urutan terjaga ─
+        // <m:oMath> bisa muncul di tengah paragraf; jika diproses terpisah
+        // dia akan muncul di posisi salah (di awal). Solusi: replace dulu.
+        String pXmlInline = pXml;
+        if (pXml.contains('<m:oMath')) {
+          final oMathReg =
+              RegExp(r'<m:oMath[ >].*?</m:oMath>', dotAll: true);
+          pXmlInline = pXmlInline.replaceAllMapped(oMathReg, (m) {
+            final eqText = _ommlToText(m.group(0)!);
+            if (eqText.isEmpty) return '';
+            // Sisipkan sebagai run palsu supaya ikut urutan teks
+            return '<w:r><w:t>[EQ: $eqText]</w:t></w:r>';
+          });
+        }
+
+        // ── Teks per run (deteksi warna merah + super/subscript) ──
+        for (final run in runReg.allMatches(pXmlInline)) {
+          final rXml = run.group(0)!;
+
+          // Warna merah: FF0000, C00000, dll (pilihan yang merupakan jawaban)
+          if (!hasRed &&
+              RegExp(r'<w:color w:val="(?:FF|ff|C0|c0)[0-9A-Fa-f]{4}"')
+                  .hasMatch(rXml)) {
+            hasRed = true;
+          }
+
+          final isSup = rXml.contains('w:val="superscript"');
+          final isSub = rXml.contains('w:val="subscript"');
+
+          for (final t in tReg.allMatches(rXml)) {
+            final txt = t.group(1) ?? '';
+            if (txt.isEmpty) continue;
+            if (isSup)      lineBuf.write('^{$txt}');
+            else if (isSub) lineBuf.write('_{$txt}');
+            else            lineBuf.write(txt);
+          }
+        }
+
+        String line = lineBuf.toString().trim();
+        if (line.isEmpty) continue;
+        line = numPrefix + line;
+        if (hasRed) line = '[JAWABAN] $line';
+        buf.writeln(line);
+      }
+
+      return (text: buf.toString(), images: namedImgs);
+    } catch (_) {
+      return (text: '', images: {});
+    }
+  }
+
+  /// Format angka list sesuai numFmt Word
+  static String _formatListNum(int n, String fmt) {
+    switch (fmt) {
+      case 'lowerLetter': return String.fromCharCode(96 + ((n - 1) % 26) + 1);
+      case 'upperLetter': return String.fromCharCode(64 + ((n - 1) % 26) + 1);
+      case 'lowerRoman':  return _toRoman(n).toLowerCase();
+      case 'upperRoman':  return _toRoman(n).toUpperCase();
+      case 'bullet':      return '•';
+      case 'none':        return '';
+      default:            return '$n';
+    }
+  }
+
+  static String _toRoman(int n) {
+    const vals = [1000,900,500,400,100,90,50,40,10,9,5,4,1];
+    const syms = ['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];
+    final buf = StringBuffer();
+    var x = n;
+    for (var i = 0; i < vals.length; i++) {
+      while (x >= vals[i]) { buf.write(syms[i]); x -= vals[i]; }
+    }
+    return buf.toString();
+  }
+
+  /// Konversi OMML XML ke teks yang readable oleh LLM
+  static String _ommlToText(String xml) {
+    // Superscript: base^{sup}
+    final sSupReg = RegExp(
+        r'<m:sSup>.*?<m:e>(.*?)</m:e>.*?<m:sup>(.*?)</m:sup>.*?</m:sSup>',
+        dotAll: true);
+    // Subscript: base_{sub}
+    final sSubReg = RegExp(
+        r'<m:sSub>.*?<m:e>(.*?)</m:e>.*?<m:sub>(.*?)</m:sub>.*?</m:sSub>',
+        dotAll: true);
+    // Fraction: (num)/(den)
+    final fracReg = RegExp(
+        r'<m:f>.*?<m:num>(.*?)</m:num>.*?<m:den>(.*?)</m:den>.*?</m:f>',
+        dotAll: true);
+    // Radical: sqrt(...)
+    final radReg = RegExp(r'<m:rad>.*?<m:e>(.*?)</m:e>.*?</m:rad>',
+        dotAll: true);
+
+    String s = xml;
+    s = s.replaceAllMapped(fracReg, (m) =>
+        '(${_mText(m.group(1)!)})/(${_mText(m.group(2)!)})');
+    s = s.replaceAllMapped(radReg,  (m) =>
+        'sqrt(${_mText(m.group(1)!)})');
+    s = s.replaceAllMapped(sSupReg, (m) =>
+        '${_mText(m.group(1)!)}^{${_mText(m.group(2)!)}}');
+    s = s.replaceAllMapped(sSubReg, (m) =>
+        '${_mText(m.group(1)!)}_{${_mText(m.group(2)!)}}');
+
+    // Sisa: ambil semua <m:t>
+    final mTReg = RegExp(r'<m:t[^>]*>(.*?)</m:t>', dotAll: true);
+    return mTReg.allMatches(s).map((m) => m.group(1) ?? '').join().trim();
+  }
+
+  static String _mText(String xml) {
+    final r = RegExp(r'<m:t[^>]*>(.*?)</m:t>', dotAll: true);
+    return r.allMatches(xml).map((m) => m.group(1) ?? '').join().trim();
+  }
+
+  /// Kirim teks ke Groq AI, kembalikan List<SoalDraft>
+  /// Provider yang didukung: 'groq', 'gemini', 'openrouter'
+  static Future<List<SoalDraft>> parse(
+    String text, Map<String, String> images, String apiKey,
+    {String provider = 'groq', String model = ''}) async {
+    final prompt =
+      'Kamu adalah asisten yang mengekstrak soal ujian dari dokumen sekolah Indonesia. '
+      'Ekstrak SEMUA soal dari teks berikut.\n'
+      'Kembalikan HANYA JSON valid, tanpa markdown, tanpa komentar.\n\n'
+      'PENANDA KHUSUS dalam teks:\n'
+      '- [JAWABAN] di awal baris = pilihan itu adalah KUNCI JAWABAN yang benar\n'
+      '- [GAMBAR_N] = ada gambar di posisi tersebut, pertahankan teks [GAMBAR_N] di field pertanyaan\n'
+      '- [EQ: ...] = persamaan matematika \u2192 konversi ke LaTeX inline (contoh: \$4^{2}=16\$)\n'
+      '- ^{...} = superscript, _{...} = subscript \u2192 konversi ke LaTeX\n\n'
+      'Format JSON:\n'
+      '{"soal":[{"nomor":1,"tipe":"PG","pertanyaan":"...","pilihan":["...","...","...","..."],"kunciJawaban":"A","skor":1}]}\n\n'
+      'Aturan WAJIB:\n'
+      '1. "pertanyaan" HARUS mencakup SEMUA konteks: lead-in/instruksi, sub-poin/pernyataan bernomor, DAN kalimat pertanyaan utama\n'
+      '2. JANGAN potong bagian apapun dari soal\n'
+      '3. tipe: "PG" untuk Pilihan Ganda, "BS" untuk Benar/Salah, "URAIAN" untuk Essay\n'
+      '4. pilihan: teks TANPA huruf A/B/C/D di depan, array [] untuk BS dan URAIAN\n'
+      '5. kunciJawaban: ambil dari baris [JAWABAN] \u2192 "A"/"B"/"C"/"D" untuk PG; "" jika tidak ada petunjuk\n'
+      '6. Semua persamaan matematika \u2192 notasi LaTeX, selalu dibungkus \$...\$\n\n'
+      'Teks dokumen:\n$text';
+
+    final String content;
+    if (provider == 'gemini') {
+      content = await _callGemini(prompt, apiKey, model);
+    } else {
+      content = await _callOpenAiCompat(prompt, apiKey, provider, model);
+    }
+
+    String jsonStr      = content.trim();
+    final jsonMatch     = RegExp(r'\{[\s\S]*\}').firstMatch(jsonStr);
+    if (jsonMatch != null) jsonStr = jsonMatch.group(0)!;
+
+    final parsed   = jsonDecode(jsonStr) as Map<String, dynamic>;
+    final soalList = parsed['soal'] as List<dynamic>;
+
+    return soalList.map((item) {
+      final m       = item as Map<String, dynamic>;
+      final tipeStr = m['tipe']?.toString().toUpperCase() ?? 'PG';
+      final tipe    = tipeStr == 'BS'     ? TipeSoal.benarSalah
+                    : tipeStr == 'URAIAN' ? TipeSoal.uraian
+                    : TipeSoal.pilihanGanda;
+      final pilihanRaw = (m['pilihan'] as List<dynamic>?)
+            ?.map((e) => e.toString()).toList() ?? <String>[];
+      if (tipe == TipeSoal.pilihanGanda) {
+        while (pilihanRaw.length < 4) pilihanRaw.add('');
+      }
+      final pertanyaan = _processEq(m['pertanyaan']?.toString() ?? '');
+
+      // Pasangkan gambar yang direferensikan dalam pertanyaan
+      String? gambarB64;
+      final gMatch = RegExp(r'\[GAMBAR_(\d+)\]').firstMatch(pertanyaan);
+      if (gMatch != null) {
+        gambarB64 = images['GAMBAR_${gMatch.group(1)}'];
+      }
+
+      return SoalDraft(
+        tipe        : tipe,
+        pertanyaan  : pertanyaan,
+        gambarBase64: gambarB64,
+        pilihan     : pilihanRaw.map(_processEq).toList(),
+        kunciJawaban: m['kunciJawaban']?.toString() ?? '',
+        skor        : (m['skor'] as num?)?.toInt() ?? 1,
+      );
+    }).toList();
+  }
+
+  // ── OpenAI-compatible (Groq & OpenRouter) ────────────────────────────
+  static Future<String> _callOpenAiCompat(
+      String prompt, String apiKey, String provider, String model) async {
+    final endpoint = provider == 'openrouter'
+        ? 'https://openrouter.ai/api/v1/chat/completions'
+        : 'https://api.groq.com/openai/v1/chat/completions';
+    final mdl = model.isNotEmpty ? model
+        : provider == 'openrouter'
+            ? 'google/gemini-2.0-flash-exp:free'
+            : 'llama-3.3-70b-versatile';
+    final headers = <String, String>{
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+      if (provider == 'openrouter') 'HTTP-Referer': 'https://bm-exam.web.app',
+    };
+    final response = await http.post(
+      Uri.parse(endpoint),
+      headers: headers,
+      body: jsonEncode({
+        'model': mdl,
+        'messages': [{'role': 'user', 'content': prompt}],
+        'temperature': 0.1,
+        'max_tokens': 8000,
+      }),
+    ).timeout(const Duration(seconds: 90));
+    if (response.statusCode != 200) {
+      final err = jsonDecode(response.body);
+      throw Exception(err['error']?['message'] ?? response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['choices'][0]['message']['content'] as String;
+  }
+
+  // ── Google Gemini ─────────────────────────────────────────────────────
+  static Future<String> _callGemini(
+      String prompt, String apiKey, String model) async {
+    final mdl = model.isNotEmpty ? model : 'gemini-2.0-flash';
+    final url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+        '$mdl:generateContent?key=$apiKey';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+        'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 8000},
+      }),
+    ).timeout(const Duration(seconds: 90));
+    if (response.statusCode != 200) {
+      final err = jsonDecode(response.body);
+      throw Exception(
+          err['error']?['message'] ?? 'Gemini error: ${response.body}');
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['candidates'][0]['content']['parts'][0]['text'] as String;
+  }
+
+  /// Konversi [EQ: ...] dan Unicode superscript/subscript ke LaTeX inline
+  static String _processEq(String text) {
+    // Tabel Unicode superscript → digit
+    const supMap = {
+      '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+      '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+      'ⁿ': 'n', 'ⁱ': 'i',
+    };
+    // Tabel Unicode subscript → digit
+    const subMap = {
+      '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+      '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+    };
+
+    String s = text;
+
+    // 0. Normalisasi $$...$$ (block LaTeX dari AI) → $...$ (inline)
+    s = s.replaceAllMapped(RegExp(r'\$\$([^$]+)\$\$'), (m) {
+      return ' \$${m.group(1)!.trim()}\$ ';
+    });
+
+    // 1. [EQ: ...] → $LaTeX$
+    s = s.replaceAllMapped(RegExp(r'\[EQ: ([^\]]+)\]'), (m) {
+      String eq = m.group(1)!.trim();
+      for (final e in supMap.entries) eq = eq.replaceAll(e.key, '^{${e.value}}');
+      for (final e in subMap.entries) eq = eq.replaceAll(e.key, '_{${e.value}}');
+      return ' \$$eq\$ ';
+    });
+
+    // 2. Unicode superscript di luar [EQ] (inline teks biasa)
+    for (final e in supMap.entries) {
+      s = s.replaceAllMapped(RegExp(r'(\S+)' + e.key), (m) {
+        return ' \$${m.group(1)!}^{${e.value}}\$ ';
+      });
+    }
+    for (final e in subMap.entries) {
+      s = s.replaceAllMapped(RegExp(r'(\S+)' + e.key), (m) {
+        return ' \$${m.group(1)!}_{${e.value}}\$ ';
+      });
+    }
+
+    // 3. Pastikan ada spasi di antara teks dan $...$ (fix "250dan$\frac...")
+    s = s.replaceAll(RegExp(r'([a-zA-Z0-9])\s*(\$[^$])'), r'$1 $2');
+    s = s.replaceAll(RegExp(r'(\$[^$]+\$)([a-zA-Z0-9])'), r'$1 $2');
+
+    // 4. Hapus spasi berlebih
+    s = s.replaceAll(RegExp(r'  +'), ' ').trim();
+
+    return s;
+  }
+}
 class SoalModel {
   final String id;
   final int nomor;
@@ -1585,6 +2022,7 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
 
   // --- Docx import state ---
   bool   _docxParsing  = false;
+  bool   _aiParsing    = false;
   String? _docxFileName;
   bool   _docxParsed   = false;
 
@@ -2377,6 +2815,71 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
             ]),
           ),
         ),
+        const SizedBox(height: 20),
+
+        // ── Divider "Atau" ──
+        Row(children: [
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text('Atau', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+          ),
+          const Expanded(child: Divider()),
+        ]),
+        const SizedBox(height: 16),
+
+        // ── Upload dengan AI ──
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.purple.shade600, Colors.indigo.shade600],
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Upload dengan AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                Text('Format bebas — AI akan memproses otomatis', style: TextStyle(color: Colors.white70, fontSize: 11)),
+              ]),
+            ]),
+            const SizedBox(height: 12),
+            const Text(
+              'Tidak perlu template khusus. Upload soal dalam format apapun — AI akan mengenali dan mengekstrak soal secara otomatis.',
+              style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            _aiParsing
+                ? const Center(child: Column(children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 8),
+                    Text('AI sedang membaca dokumen...', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  ]))
+                : SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.purple.shade700,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: _docxParsing ? null : _pickDocxWithAi,
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: const Text('Pilih File .docx', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+          ]),
+        ),
       ]),
     );
   }
@@ -2429,6 +2932,74 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
   }
 
   static List<SoalModel> _parseDocxIsolate(Uint8List bytes) => DocxParser.parse(bytes);
+
+  Future<void> _pickDocxWithAi() async {
+    // 1. Ambil provider + API key dari Firestore
+    String provider = 'groq';
+    String apiKey   = '';
+    String aiModel  = '';
+    try {
+      final doc = await FirebaseFirestore.instance.collection('settings').doc('app_config').get();
+      final data = doc.data() ?? {};
+      provider = data['ai_provider']?.toString() ?? 'groq';
+      aiModel  = data['ai_model']?.toString() ?? '';
+      final keyField = provider == 'gemini'      ? 'gemini_api_key'
+                     : provider == 'openrouter'  ? 'openrouter_api_key'
+                     : 'groq_api_key';
+      apiKey = data[keyField]?.toString() ?? '';
+    } catch (_) {}
+
+    if (apiKey.isEmpty) {
+      final provName = provider == 'gemini' ? 'Gemini'
+                     : provider == 'openrouter' ? 'OpenRouter' : 'Groq';
+      _snack('API Key $provName belum diatur. Isi di Settings → AI Provider.', Colors.orange);
+      return;
+    }
+
+    setState(() => _aiParsing = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom, allowedExtensions: ['docx'], withData: true,
+      );
+      if (result == null || result.files.isEmpty) { setState(() => _aiParsing = false); return; }
+
+      final bytes = result.files.first.bytes;
+      if (bytes == null) {
+        _snack('Gagal membaca file', Colors.red);
+        setState(() => _aiParsing = false); return;
+      }
+
+      // 2. Ekstrak teks + gambar dari docx
+      final extracted = GroqAiParser.extractStructured(bytes);
+      if (extracted.text.trim().isEmpty) {
+        _snack('File tidak dapat dibaca atau kosong', Colors.red);
+        setState(() => _aiParsing = false); return;
+      }
+
+      // 3. Kirim ke AI
+      final drafts = await GroqAiParser.parse(
+          extracted.text, extracted.images, apiKey,
+          provider: provider, model: aiModel);
+      _soals.clear();
+      _soals.addAll(drafts);
+
+      setState(() {
+        _docxFileName = result.files.first.name;
+        _aiParsing    = false;
+        _docxParsed   = drafts.isNotEmpty;
+        _editingIndex = -1;
+      });
+
+      if (drafts.isEmpty) {
+        _snack('AI tidak menemukan soal dalam dokumen ini.', Colors.orange);
+      } else {
+        _snack('${drafts.length} soal berhasil diparse oleh AI! Cek & edit sebelum upload.', Colors.green);
+      }
+    } catch (e) {
+      setState(() => _aiParsing = false);
+      _snack('Gagal: $e', Colors.red);
+    }
+  }
 
   // ============================================================
   // STEP 99: SELESAI
@@ -6700,6 +7271,118 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
         ),
       ),
 
+      // AI Provider untuk parse soal otomatis
+      Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [Colors.purple.shade600, Colors.indigo.shade600]),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 16),
+              ),
+              const SizedBox(width: 10),
+              const Text("AI untuk Upload Soal",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            ]),
+            const SizedBox(height: 6),
+            const Text("Pilih provider AI dan masukkan API Key untuk fitur upload soal otomatis.",
+                style: TextStyle(color: Colors.grey, fontSize: 12)),
+            const Divider(height: 20),
+            StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance.collection('settings').doc('app_config').snapshots(),
+              builder: (ctx, snap) {
+                final data = snap.hasData && snap.data!.exists
+                    ? snap.data!.data() as Map<String, dynamic> : <String, dynamic>{};
+                final provider = data['ai_provider']?.toString() ?? 'groq';
+                final keyField = provider == 'gemini'     ? 'gemini_api_key'
+                               : provider == 'openrouter' ? 'openrouter_api_key'
+                               : 'groq_api_key';
+                final hintMap = {
+                  'groq':        'gsk_xxxxxxxxxxxxxxxxxxxx',
+                  'gemini':      'AIzaSyXXXXXXXXXXXXXXXXXX',
+                  'openrouter':  'sk-or-v1-xxxxxxxxxxxxxxxxxxxx',
+                };
+                final infoMap = {
+                  'groq':       '🔗 console.groq.com — Gratis, cepat (Llama 3.3 70B)',
+                  'gemini':     '🔗 aistudio.google.com — Gratis, pintar (Gemini 2.0 Flash)',
+                  'openrouter': '🔗 openrouter.ai — Gratis, pilihan model banyak',
+                };
+                final ctrl = TextEditingController(text: data[keyField]?.toString() ?? '');
+                final modelCtrl = TextEditingController(text: data['ai_model']?.toString() ?? '');
+                void save() {
+                  FirebaseFirestore.instance.collection('settings').doc('app_config').set({
+                    'ai_provider': provider,
+                    keyField: ctrl.text.trim(),
+                    'ai_model': modelCtrl.text.trim(),
+                  }, SetOptions(merge: true));
+                }
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // Provider selector
+                  const Text("Provider", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    _aiProviderChip('groq',       'Groq',       provider, Icons.bolt),
+                    const SizedBox(width: 8),
+                    _aiProviderChip('gemini',     'Gemini',     provider, Icons.stars),
+                    const SizedBox(width: 8),
+                    _aiProviderChip('openrouter', 'OpenRouter', provider, Icons.hub),
+                  ]),
+                  const SizedBox(height: 10),
+                  Text(infoMap[provider] ?? '', style: const TextStyle(fontSize: 11, color: Colors.blue)),
+                  const SizedBox(height: 12),
+                  // API Key
+                  const Text("API Key", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: ctrl,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          hintText: hintMap[provider] ?? '',
+                          prefixIcon: const Icon(Icons.vpn_key_outlined),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple.shade700, foregroundColor: Colors.white),
+                      onPressed: save,
+                      child: const Text("Simpan"),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  // Model override (opsional)
+                  const Text("Model (opsional, kosongkan = default)",
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: modelCtrl,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      hintText: provider == 'gemini' ? 'gemini-2.0-flash'
+                               : provider == 'openrouter' ? 'google/gemini-2.0-flash-exp:free'
+                               : 'llama-3.3-70b-versatile',
+                      prefixIcon: const Icon(Icons.memory_outlined),
+                    ),
+                    onSubmitted: (_) => save(),
+                  ),
+                ]);
+              },
+            ),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 12),
+
       // Reset Status
       Card(
         shape: RoundedRectangleBorder(
@@ -7699,6 +8382,13 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
           final examDoc = await FirebaseFirestore.instance
               .collection('exam').doc(_exam!.id).get();
           final isNative = (examDoc.data() as Map?)?['mode'] == 'native';
+
+          // Untuk Web (Safari iPad) dengan antiCurang: wajib konfirmasi Guided Access
+          if (kIsWeb && _exam!.antiCurang) {
+            final confirmed = await _showWebGuidedAccessConfirmDialog();
+            if (!confirmed) return;
+          }
+
           if (isNative) {
             // Cek kiosk sebelum masuk ujian (Android: Device Admin, iOS: Guided Access)
             if ((isAndroid || (!kIsWeb && Platform.isIOS)) && _exam!.antiCurang) {
@@ -7947,6 +8637,95 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
         Expanded(child: Text(text, style: const TextStyle(fontSize: 12, height: 1.4))),
       ]),
     );
+  }
+
+  // ── Web (Safari iPad): dialog konfirmasi Guided Access ──────────────────
+  Future<bool> _showWebGuidedAccessConfirmDialog() async {
+    if (!mounted) return false;
+    bool checked = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          icon: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle),
+            child: Icon(Icons.accessibility_new_rounded, color: Colors.blue.shade700, size: 36),
+          ),
+          title: const Text('Aktifkan Guided Access',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Ujian ini menggunakan mode anti-curang. '
+                'Aktifkan Guided Access agar layar iPad terkunci selama ujian.',
+                style: TextStyle(fontSize: 13, height: 1.5),
+              ),
+              const SizedBox(height: 14),
+              _gaStep('1', 'Ketuk tiga kali tombol samping iPad (atau tombol Home)'),
+              _gaStep('2', 'Pilih "Guided Access" dari menu yang muncul'),
+              _gaStep('3', 'Ketuk "Mulai" di pojok kanan atas layar'),
+              const SizedBox(height: 14),
+              Container(
+                decoration: BoxDecoration(
+                  color: checked ? Colors.green.shade50 : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: checked ? Colors.green.shade300 : Colors.grey.shade300),
+                ),
+                child: CheckboxListTile(
+                  value: checked,
+                  activeColor: Colors.green.shade700,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  title: const Text(
+                    'Saya sudah mengaktifkan Guided Access',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  onChanged: (val) => setDialogState(() => checked = val ?? false),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(children: [
+                  Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orange.shade700),
+                  const SizedBox(width: 6),
+                  const Expanded(child: Text(
+                    'Jika Anda berpindah tab atau keluar dari halaman ini, pelanggaran akan tercatat.',
+                    style: TextStyle(fontSize: 11, height: 1.4),
+                  )),
+                ]),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: checked ? Colors.blue.shade700 : Colors.grey.shade400,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: checked ? () => Navigator.pop(ctx, true) : null,
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: const Text('Mulai Ujian'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return confirmed == true;
   }
 
   // Cek apakah string hari mengandung tanggal hari ini
@@ -10418,9 +11197,13 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
 // HELPER: Render text with inline LaTeX
 // ============================================================
 Widget _buildTextWithLatex(String text, double fontSize) {
-  // Detect LaTeX: $...$ atau \(...\)
+  // Normalisasi $$...$$ → $...$
+  String t = text.replaceAllMapped(
+      RegExp(r'\$\$([^$]+)\$\$'), (m) => ' \$${m.group(1)!.trim()}\$ ');
+  // Detect LaTeX: $...$
   final parts = <InlineSpan>[];
   final latexReg = RegExp(r'\$([^$]+)\$');
+  text = t;
   int lastEnd = 0;
   for (final m in latexReg.allMatches(text)) {
     if (m.start > lastEnd) {
@@ -10450,6 +11233,39 @@ Widget _buildTextWithLatex(String text, double fontSize) {
 // ============================================================
 // GLOBAL THEME SWITCHER WIDGET
 // ============================================================
+/// Chip pemilih AI provider di Settings
+Widget _aiProviderChip(String value, String label, String current, IconData icon) {
+  final selected = value == current;
+  return GestureDetector(
+    onTap: () => FirebaseFirestore.instance
+        .collection('settings')
+        .doc('app_config')
+        .set({'ai_provider': value}, SetOptions(merge: true)),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: selected ? Colors.purple.shade700 : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: selected ? Colors.purple.shade700 : Colors.grey.shade300,
+        ),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14,
+            color: selected ? Colors.white : Colors.grey.shade600),
+        const SizedBox(width: 5),
+        Text(label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: selected ? Colors.white : Colors.grey.shade700,
+            )),
+      ]),
+    ),
+  );
+}
+
 Widget _buildThemeSwitcher() {
   return StatefulBuilder(
     builder: (ctx, setSt) {
