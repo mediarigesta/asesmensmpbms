@@ -13,6 +13,9 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
@@ -336,6 +339,8 @@ class UserAccount {
   final String id, kode, nama, username, password, role, ruang,
       statusMengerjakan, statusAktif, photo, liveFrame;
   final int battery;
+  // Status per-ujian, disimpan sebagai map: { examId: { status, violationCount, ... } }
+  final Map<String, dynamic> examStatus;
 
   UserAccount({
     required this.id,
@@ -350,6 +355,7 @@ class UserAccount {
     required this.battery,
     required this.photo,
     required this.liveFrame,
+    required this.examStatus,
   });
 
   factory UserAccount.fromFirestore(DocumentSnapshot doc) {
@@ -367,7 +373,25 @@ class UserAccount {
       battery: data['battery'] ?? 100,
       photo: data['photo'] ?? "",
       liveFrame: data['liveFrame'] ?? "",
+      examStatus: Map<String, dynamic>.from(data['exam_status'] ?? const {}),
     );
+  }
+
+  /// Status khusus untuk 1 ujian. Jika belum ada, fallback ke status global.
+  String statusForExam(String examId) {
+    final raw = examStatus[examId];
+    if (raw is Map && raw['status'] is String && (raw['status'] as String).isNotEmpty) {
+      return raw['status'] as String;
+    }
+    return statusMengerjakan;
+  }
+
+  int violationForExam(String examId) {
+    final raw = examStatus[examId];
+    if (raw is Map && raw['violationCount'] is int) {
+      return raw['violationCount'] as int;
+    }
+    return 0;
   }
 
   String get classFolder {
@@ -416,6 +440,9 @@ class ExamData {
   final String kategori;
   final String creatorName;
   final List<String> targetKelas;
+  final int kkm; // Kriteria Ketuntasan Minimal (0 = tidak aktif)
+  final String spiType; // reguler, susulan, remedial
+  final String? parentExamId; // ID ujian induk untuk susulan/remedial
 
   ExamData({
     required this.id,
@@ -436,6 +463,9 @@ class ExamData {
     this.kategori = '',
     this.creatorName = '',
     this.targetKelas = const [],
+    this.kkm = 0,
+    this.spiType = 'reguler',
+    this.parentExamId,
   });
 
   factory ExamData.fromFirestore(DocumentSnapshot doc) {
@@ -460,6 +490,9 @@ class ExamData {
       kategori: data['kategori'] ?? '',
       creatorName: data['creatorName'] ?? '',
       targetKelas: List<String>.from(data['targetKelas'] ?? []),
+      kkm: data['kkm'] ?? 0,
+      spiType: data['spiType'] ?? 'reguler',
+      parentExamId: data['parentExamId'],
     );
   }
 
@@ -470,6 +503,31 @@ class ExamData {
   bool get belumMulai => DateTime.now().isBefore(waktuMulai);
 
   Duration get sisaWaktu => waktuSelesai.difference(DateTime.now());
+}
+
+/// Helper: update status ujian per-siswa, per-ujian.
+/// - Menyimpan status global `status_mengerjakan` (terakhir dikerjakan)
+/// - Menyimpan juga di nested map `exam_status.<examId>.status` agar riwayat per-ujian tidak hilang.
+Future<void> updateExamStatusForUser({
+  required ExamData exam,
+  required UserAccount user,
+  required String status,
+  int? violationCount,
+  Map<String, dynamic>? extraFields,
+}) async {
+  final docRef = FirebaseFirestore.instance.collection('users').doc(user.id);
+  final data = <String, dynamic>{
+    'status_mengerjakan': status,
+    'exam_status.${exam.id}.status': status,
+    'exam_status.${exam.id}.updatedAt': FieldValue.serverTimestamp(),
+  };
+  if (violationCount != null) {
+    data['exam_status.${exam.id}.violationCount'] = violationCount;
+  }
+  if (extraFields != null) {
+    data.addAll(extraFields);
+  }
+  await docRef.update(data);
 }
 
 // ============================================================
@@ -3133,6 +3191,9 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 6, runSpacing: 4, children: [
+          if (e.spiType == 'remedial') _examBadge('Remedial', Colors.deepOrange.shade50, Colors.deepOrange),
+          if (e.spiType == 'susulan') _examBadge('Susulan', Colors.indigo.shade50, Colors.indigo),
+          if (e.kkm > 0) _examBadge('KKM ${e.kkm}', Colors.teal.shade50, Colors.teal),
           if (e.kategori.isNotEmpty) _examBadge(e.kategori, Colors.purple.shade100, Colors.purple.shade700),
           _examBadge(isNativeMode ? 'Via Aplikasi' : 'Via Google Form', Colors.blue.shade50, Colors.blue.shade600),
           if (!isDraft) _examBadge(DateFormat('dd MMM, HH:mm').format(e.waktuMulai) + ' — ' + DateFormat('HH:mm').format(e.waktuSelesai), Colors.grey.shade100, Colors.grey.shade600),
@@ -3453,6 +3514,9 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
   // --- Pengaturan ---
   bool _anti = true, _cam = true, _auto = true;
   int  _max  = 3;
+  int  _kkm  = 0; // 0 = tidak aktif
+  String _spiType = 'reguler'; // reguler, susulan, remedial
+  String? _parentExamId;
   DateTime  _tgl      = DateTime.now();
   TimeOfDay _jamStart = TimeOfDay.now();
   TimeOfDay _jamEnd   = const TimeOfDay(hour: 10, minute: 0);
@@ -3521,6 +3585,9 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
         'kategori'   : _selKategori ?? '',
         'creatorName': widget.creatorName ?? '',
         'targetKelas': _selTargetKelas.toList(),
+        'kkm': _kkm,
+        'spiType': _spiType,
+        if (_parentExamId != null) 'parentExamId': _parentExamId,
       };
       if (_savedExamId != null) {
         await FirebaseFirestore.instance.collection('exam').doc(_savedExamId).update(data);
@@ -3982,6 +4049,52 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
               subtitle: const Text("Submit otomatis saat waktu habis"),
               value: _auto, onChanged: (v) => setState(() => _auto = v),
             ),
+            const Divider(height: 16),
+            // KKM
+            Row(children: [
+              const Icon(Icons.verified, color: Colors.teal, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(child: Text("KKM (Kriteria Ketuntasan)",
+                  style: TextStyle(fontWeight: FontWeight.w500))),
+              SizedBox(
+                width: 60,
+                child: TextField(
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: OutlineInputBorder(),
+                    hintText: '0',
+                  ),
+                  controller: TextEditingController(text: _kkm > 0 ? '$_kkm' : ''),
+                  onChanged: (v) => _kkm = int.tryParse(v) ?? 0,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 4),
+            Text(_kkm > 0 ? "Siswa di bawah $_kkm dianggap tidak tuntas" : "KKM tidak aktif (0)",
+                style: TextStyle(fontSize: 11, color: _kkm > 0 ? Colors.teal : Colors.grey)),
+            const Divider(height: 16),
+            // Tipe Sesi
+            Row(children: [
+              const Icon(Icons.event_repeat, color: Color(0xFF0F172A), size: 20),
+              const SizedBox(width: 8),
+              const Text("Tipe Sesi", style: TextStyle(fontWeight: FontWeight.w500)),
+              const Spacer(),
+              SegmentedButton<String>(
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: WidgetStatePropertyAll(const TextStyle(fontSize: 11)),
+                ),
+                segments: const [
+                  ButtonSegment(value: 'reguler', label: Text('Reguler')),
+                  ButtonSegment(value: 'susulan', label: Text('Susulan')),
+                  ButtonSegment(value: 'remedial', label: Text('Remedial')),
+                ],
+                selected: {_spiType},
+                onSelectionChanged: (v) => setState(() => _spiType = v.first),
+              ),
+            ]),
           ],
         )),
       ),
@@ -6105,6 +6218,9 @@ class _ExamEditScreenState extends State<ExamEditScreen> with SingleTickerProvid
   late int _maxCurang;
   late bool _kameraAktif;
   late bool _autoSubmit;
+  late int _kkm;
+  late String _spiType;
+  String? _parentExamId;
   bool _saving = false;
   List<String> _subjects = [];
 
@@ -6133,6 +6249,9 @@ class _ExamEditScreenState extends State<ExamEditScreen> with SingleTickerProvid
     _maxCurang = e.maxCurang;
     _kameraAktif = e.kameraAktif;
     _autoSubmit = e.autoSubmit;
+    _kkm = e.kkm;
+    _spiType = e.spiType;
+    _parentExamId = e.parentExamId;
 
     // Jika gunakan ulang, geser waktu ke hari ini
     if (widget.isReuse) {
@@ -6359,6 +6478,9 @@ class _ExamEditScreenState extends State<ExamEditScreen> with SingleTickerProvid
         'maxCurang': _maxCurang,
         'kameraAktif': _kameraAktif,
         'autoSubmit': _autoSubmit,
+        'kkm': _kkm,
+        'spiType': _spiType,
+        if (_parentExamId != null) 'parentExamId': _parentExamId,
       };
 
       if (widget.isReuse) {
@@ -6636,6 +6758,42 @@ class _ExamEditScreenState extends State<ExamEditScreen> with SingleTickerProvid
                 subtitle: const Text("Form otomatis dikunci saat waktu habis"),
                 value: _autoSubmit,
                 onChanged: (v) => setState(() => _autoSubmit = v),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.verified, color: Colors.teal),
+                title: const Text("KKM (Kriteria Ketuntasan)"),
+                subtitle: Text(_kkm > 0 ? "Nilai minimum: $_kkm" : "Tidak aktif"),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: _kkm > 0 ? () => setState(() => _kkm = (_kkm - 5).clamp(0, 100)) : null,
+                  ),
+                  Text("$_kkm",
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: _kkm < 100 ? () => setState(() => _kkm = (_kkm + 5).clamp(0, 100)) : null,
+                  ),
+                ]),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.event_repeat, color: Color(0xFF0F172A)),
+                title: const Text("Tipe Sesi"),
+                subtitle: SegmentedButton<String>(
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    textStyle: WidgetStatePropertyAll(const TextStyle(fontSize: 11)),
+                  ),
+                  segments: const [
+                    ButtonSegment(value: 'reguler', label: Text('Reguler')),
+                    ButtonSegment(value: 'susulan', label: Text('Susulan')),
+                    ButtonSegment(value: 'remedial', label: Text('Remedial')),
+                  ],
+                  selected: {_spiType},
+                  onSelectionChanged: (v) => setState(() => _spiType = v.first),
+                ),
               ),
             ]),
           ),
@@ -7124,6 +7282,17 @@ class _ExamEditScreenState extends State<ExamEditScreen> with SingleTickerProvid
   }
 }
 
+class _PdfSiswaRow {
+  final String nama, kode, kelas, ruang, status;
+  final double nilai;
+  final int benar, totalSoal, violations;
+  const _PdfSiswaRow({
+    required this.nama, required this.kode, required this.kelas,
+    required this.ruang, required this.status, required this.nilai,
+    required this.benar, required this.totalSoal, required this.violations,
+  });
+}
+
 class ExamHistoryScreen extends StatefulWidget {
   final ExamData exam;
   const ExamHistoryScreen({super.key, required this.exam});
@@ -7134,9 +7303,21 @@ class ExamHistoryScreen extends StatefulWidget {
 class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
   String _filterStatus = "semua";
   String _search = "";
-  int _tabIndex = 0; // 0=Peserta, 1=Statistik
+  int _tabIndex = 0; // 0=Peserta, 1=Statistik, 2=Analisis Butir Soal
 
   ExamData get exam => widget.exam;
+
+  // Analisis butir soal data (loaded on demand)
+  List<Map<String, dynamic>>? _itemAnalysis;
+  bool _loadingAnalysis = false;
+  double? _avgNilai;
+  int? _totalMaxSkor;
+
+  // Score data for Statistik tab (loaded on demand)
+  Map<String, Map<String, dynamic>>? _scoreData; // siswaId -> {totalNilai, totalBenar, ...}
+  bool _loadingScores = false;
+
+  String _statusForExam(UserAccount s) => s.statusForExam(exam.id);
 
   Color _statusColor(String s) {
     switch (s) {
@@ -7248,22 +7429,45 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     );
   }
 
-  // ── Export CSV ──
+  // ── Export CSV (enhanced with scores) ──
   void _exportCSV(List<UserAccount> peserta) {
     final buf = StringBuffer();
-    buf.writeln("Nama,Kode,Kelas,Ruang,Status,Keterangan");
+    final hasScores = _scoreData != null;
+    // Header
+    buf.write("Nama,Kode,Kelas,Ruang,Status,Jml Pelanggaran,Jml Proktor PIN,Alasan Terakhir");
+    if (hasScores) buf.write(",Nilai,Benar,Total Soal,Dijawab");
+    buf.writeln(",Keterangan");
+
     for (final s in peserta) {
-      final status = s.statusMengerjakan;
+      final status = _statusForExam(s);
+      final vCount = s.violationForExam(exam.id);
+      final rawExam = s.examStatus[exam.id];
+      final lastReason = (rawExam is Map && rawExam['lastViolationReason'] != null)
+          ? rawExam['lastViolationReason'].toString()
+          : '';
+      final proktorCount = (rawExam is Map && rawExam['proktorUnlockCount'] is int)
+          ? rawExam['proktorUnlockCount'] as int
+          : 0;
       final ket = status == 'selesai' ? 'Selesai mengerjakan'
           : status == 'melanggar' ? 'Terdeteksi melanggar'
           : status == 'mengerjakan' ? 'Sedang mengerjakan'
           : 'Belum mulai';
-      buf.writeln('"${s.nama}","${s.kode}","${s.classFolder}","${s.ruang}","$status","$ket"');
+      buf.write('"${s.nama}","${s.kode}","${s.classFolder}","${s.ruang}","$status","$vCount","$proktorCount","$lastReason"');
+      if (hasScores) {
+        final sd = _scoreData![s.id];
+        if (sd != null) {
+          buf.write(',"${sd['totalNilai'] ?? 0}","${sd['totalBenar'] ?? 0}","${sd['totalSoal'] ?? 0}","${sd['jumlahDijawab'] ?? 0}"');
+        } else {
+          buf.write(',"-","-","-","-"');
+        }
+      }
+      buf.writeln(',"$ket"');
     }
-    final selesai = peserta.where((s) => s.statusMengerjakan == 'selesai').length;
-    final langgar = peserta.where((s) => s.statusMengerjakan == 'melanggar').length;
-    final mengerjakan = peserta.where((s) => s.statusMengerjakan == 'mengerjakan').length;
-    final belum = peserta.where((s) => s.statusMengerjakan == 'belum mulai').length;
+
+    final selesai = peserta.where((s) => _statusForExam(s) == 'selesai').length;
+    final langgar = peserta.where((s) => _statusForExam(s) == 'melanggar').length;
+    final mengerjakan = peserta.where((s) => _statusForExam(s) == 'mengerjakan').length;
+    final belum = peserta.where((s) => _statusForExam(s) == 'belum mulai').length;
     buf.writeln('');
     buf.writeln('"RINGKASAN"');
     buf.writeln('"Total Peserta","${peserta.length}"');
@@ -7274,12 +7478,27 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     buf.writeln('"Ujian","${exam.judul}"');
     buf.writeln('"Mapel","${exam.mapel}"');
     buf.writeln('"Jenjang","${exam.jenjang}"');
+
+    if (hasScores) {
+      final scores = _scoreData!.values
+          .map((d) => (d['totalNilai'] as num?)?.toDouble() ?? 0)
+          .toList()..sort();
+      if (scores.isNotEmpty) {
+        final avg = scores.reduce((a, b) => a + b) / scores.length;
+        buf.writeln('"Rata-rata Nilai","${avg.toStringAsFixed(1)}"');
+        buf.writeln('"Nilai Tertinggi","${scores.last.toStringAsFixed(0)}"');
+        buf.writeln('"Nilai Terendah","${scores.first.toStringAsFixed(0)}"');
+      }
+    }
+
     final csv = buf.toString();
     Clipboard.setData(ClipboardData(text: csv));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text("✅ Data nilai disalin ke clipboard! Paste ke Excel/Sheets."),
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(hasScores
+          ? "Data rekap + nilai disalin ke clipboard!"
+          : "Data rekap disalin ke clipboard! (Muat Nilai di tab Statistik untuk export lengkap)"),
       backgroundColor: Colors.green,
-      duration: Duration(seconds: 4),
+      duration: const Duration(seconds: 4),
     ));
   }
 
@@ -7311,7 +7530,10 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     for (final s in peserta) {
       batch.update(
         FirebaseFirestore.instance.collection('users').doc(s.id),
-        {'status_mengerjakan': 'belum mulai'},
+        {
+          'exam_status.${exam.id}.status': 'belum mulai',
+          'exam_status.${exam.id}.violationCount': 0,
+        },
       );
     }
     await batch.commit();
@@ -7394,10 +7616,10 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
 
   // ── Tab Statistik ──
   Widget _buildStatistikTab(List<UserAccount> peserta) {
-    final selesai = peserta.where((s) => s.statusMengerjakan == 'selesai').length;
-    final melanggar = peserta.where((s) => s.statusMengerjakan == 'melanggar').length;
-    final mengerjakan = peserta.where((s) => s.statusMengerjakan == 'mengerjakan').length;
-    final belum = peserta.where((s) => s.statusMengerjakan == 'belum mulai').length;
+    final selesai = peserta.where((s) => _statusForExam(s) == 'selesai').length;
+    final melanggar = peserta.where((s) => _statusForExam(s) == 'melanggar').length;
+    final mengerjakan = peserta.where((s) => _statusForExam(s) == 'mengerjakan').length;
+    final belum = peserta.where((s) => _statusForExam(s) == 'belum mulai').length;
 
     // Grup per kelas untuk bar chart
     final Map<String, List<UserAccount>> grouped = {};
@@ -7498,10 +7720,10 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
           const SizedBox(height: 12),
           ...sortedKeys.map((kelas) {
             final list = grouped[kelas]!;
-            final s = list.where((x) => x.statusMengerjakan == 'selesai').length;
-            final m = list.where((x) => x.statusMengerjakan == 'mengerjakan').length;
-            final l = list.where((x) => x.statusMengerjakan == 'melanggar').length;
-            final b = list.where((x) => x.statusMengerjakan == 'belum mulai').length;
+            final s = list.where((x) => _statusForExam(x) == 'selesai').length;
+            final m = list.where((x) => _statusForExam(x) == 'mengerjakan').length;
+            final l = list.where((x) => _statusForExam(x) == 'melanggar').length;
+            final b = list.where((x) => _statusForExam(x) == 'belum mulai').length;
             final total = list.length;
             return Card(
               margin: const EdgeInsets.only(bottom: 10),
@@ -7550,7 +7772,305 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
             );
           }),
         ],
+
+        // ── Score Distribution Section ──
+        const SizedBox(height: 24),
+        Row(children: [
+          const Text("Distribusi Nilai",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const Spacer(),
+          if (_scoreData == null && !_loadingScores)
+            TextButton.icon(
+              onPressed: _loadScores,
+              icon: const Icon(Icons.download, size: 16),
+              label: const Text("Muat Nilai", style: TextStyle(fontSize: 12)),
+            ),
+          if (_loadingScores)
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+        ]),
+        const SizedBox(height: 8),
+        if (_scoreData != null) _buildScoreDistribution(peserta),
+        if (_scoreData == null && !_loadingScores)
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: Text("Tekan 'Muat Nilai' untuk melihat distribusi nilai.",
+                  style: TextStyle(color: Colors.grey, fontSize: 12))),
+            ),
+          ),
       ]),
+    );
+  }
+
+  // ── Score Distribution Widget ──
+  Widget _buildScoreDistribution(List<UserAccount> peserta) {
+    final scores = <double>[];
+    final Map<String, double> scorePerSiswa = {};
+    for (final s in peserta) {
+      final d = _scoreData?[s.id];
+      if (d != null) {
+        final val = (d['totalNilai'] as num?)?.toDouble() ?? 0;
+        scores.add(val);
+        scorePerSiswa[s.id] = val;
+      }
+    }
+    if (scores.isEmpty) {
+      return Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: const Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: Text("Belum ada data nilai.",
+              style: TextStyle(color: Colors.grey, fontSize: 12))),
+        ),
+      );
+    }
+
+    scores.sort();
+    final avg = scores.reduce((a, b) => a + b) / scores.length;
+    final median = scores.length.isOdd
+        ? scores[scores.length ~/ 2]
+        : (scores[scores.length ~/ 2 - 1] + scores[scores.length ~/ 2]) / 2;
+    final minVal = scores.first;
+    final maxVal = scores.last;
+    final stdDev = scores.length > 1
+        ? sqrt(scores.map((s) => (s - avg) * (s - avg)).reduce((a, b) => a + b) / scores.length)
+        : 0.0;
+
+    // Histogram buckets (0-10, 10-20, ..., 90-100)
+    final buckets = List.filled(10, 0);
+    final maxScore = maxVal > 0 ? maxVal : 100;
+    for (final s in scores) {
+      int idx = maxScore > 0 ? ((s / maxScore) * 9.99).floor().clamp(0, 9) : 0;
+      buckets[idx]++;
+    }
+    final maxBucket = buckets.reduce((a, b) => a > b ? a : b);
+
+    // Top 5 / Bottom 5
+    final sorted = scorePerSiswa.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top5 = sorted.take(5).toList();
+    final bottom5 = sorted.reversed.take(5).toList();
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Summary stats
+      Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(children: [
+            Row(children: [
+              _scoreStat("Rata-rata", avg.toStringAsFixed(1), Colors.blue),
+              const SizedBox(width: 8),
+              _scoreStat("Median", median.toStringAsFixed(1), Colors.teal),
+              const SizedBox(width: 8),
+              _scoreStat("Std Dev", stdDev.toStringAsFixed(1), Colors.purple),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              _scoreStat("Min", minVal.toStringAsFixed(0), Colors.red),
+              const SizedBox(width: 8),
+              _scoreStat("Max", maxVal.toStringAsFixed(0), Colors.green),
+              const SizedBox(width: 8),
+              _scoreStat("Peserta", "${scores.length}", Colors.blueGrey),
+            ]),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 14),
+
+      // Histogram
+      Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text("Histogram Nilai",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 120,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(10, (i) {
+                  final h = maxBucket > 0 ? (buckets[i] / maxBucket * 100) : 0.0;
+                  final pctLabel = "${i * 10}-${(i + 1) * 10}";
+                  return Expanded(child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+                      if (buckets[i] > 0) Text("${buckets[i]}", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                      Container(
+                        height: h.clamp(4.0, 100.0),
+                        decoration: BoxDecoration(
+                          color: i < 3 ? Colors.red.shade300 : i < 7 ? Colors.blue.shade400 : Colors.green.shade400,
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(pctLabel, style: const TextStyle(fontSize: 8, color: Colors.grey)),
+                    ]),
+                  ));
+                }),
+              ),
+            ),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 14),
+
+      // Top 5 performers
+      Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.emoji_events, color: Colors.amber, size: 18),
+              const SizedBox(width: 6),
+              const Text("Top 5 Nilai Tertinggi",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ]),
+            const SizedBox(height: 8),
+            ...top5.asMap().entries.map((e) {
+              final idx = e.key;
+              final entry = e.value;
+              final siswa = peserta.where((s) => s.id == entry.key).firstOrNull;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  CircleAvatar(
+                    radius: 12,
+                    backgroundColor: idx == 0 ? Colors.amber : idx == 1 ? Colors.grey.shade400 : Colors.brown.shade300,
+                    child: Text("${idx + 1}", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(siswa?.nama ?? entry.key, style: const TextStyle(fontSize: 12))),
+                  Text(entry.value.toStringAsFixed(0),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
+                ]),
+              );
+            }),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 10),
+
+      // Bottom 5 performers
+      Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.trending_down, color: Colors.red.shade400, size: 18),
+              const SizedBox(width: 6),
+              const Text("5 Nilai Terendah",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ]),
+            const SizedBox(height: 8),
+            ...bottom5.asMap().entries.map((e) {
+              final entry = e.value;
+              final siswa = peserta.where((s) => s.id == entry.key).firstOrNull;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(siswa?.nama ?? entry.key, style: const TextStyle(fontSize: 12))),
+                  Text(entry.value.toStringAsFixed(0),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red.shade400)),
+                ]),
+              );
+            }),
+          ]),
+        ),
+      ),
+
+      // KKM Summary
+      if (exam.kkm > 0) ...[
+        const SizedBox(height: 14),
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.verified, color: Colors.teal, size: 18),
+                const SizedBox(width: 6),
+                Text("KKM: ${exam.kkm}",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              ]),
+              const SizedBox(height: 10),
+              Builder(builder: (_) {
+                final tuntas = scorePerSiswa.values.where((v) => v >= exam.kkm).length;
+                final tidakTuntas = scorePerSiswa.values.where((v) => v < exam.kkm).length;
+                final pctTuntas = scorePerSiswa.isNotEmpty ? (tuntas / scorePerSiswa.length * 100) : 0.0;
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    _scoreStat("Tuntas", "$tuntas", Colors.green),
+                    const SizedBox(width: 8),
+                    _scoreStat("Tidak Tuntas", "$tidakTuntas", Colors.red),
+                    const SizedBox(width: 8),
+                    _scoreStat("% Tuntas", "${pctTuntas.toStringAsFixed(1)}%", Colors.teal),
+                  ]),
+                  const SizedBox(height: 10),
+                  // Progress bar
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: scorePerSiswa.isNotEmpty ? tuntas / scorePerSiswa.length : 0,
+                      minHeight: 10,
+                      backgroundColor: Colors.red.shade100,
+                      valueColor: AlwaysStoppedAnimation(Colors.green.shade400),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    tuntas == scorePerSiswa.length
+                        ? "Semua siswa tuntas!"
+                        : "$tidakTuntas siswa perlu remedial",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: tuntas == scorePerSiswa.length ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (tidakTuntas > 0) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.event_repeat, size: 16),
+                        label: const Text("Buat Ujian Remedial", style: TextStyle(fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.deepOrange,
+                          side: const BorderSide(color: Colors.deepOrange),
+                        ),
+                        onPressed: () => _createRemedialExam(peserta, scorePerSiswa),
+                      ),
+                    ),
+                  ],
+                ]);
+              }),
+            ]),
+          ),
+        ),
+      ],
+    ]);
+  }
+
+  Widget _scoreStat(String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(children: [
+          Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
+          Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        ]),
+      ),
     );
   }
 
@@ -7565,11 +8085,907 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     );
   }
 
+  // ── Load Scores from activity_log ──
+  Future<void> _loadScores() async {
+    if (_loadingScores || _scoreData != null) return;
+    setState(() => _loadingScores = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('exam').doc(exam.id).collection('activity_log').get();
+      final Map<String, Map<String, dynamic>> data = {};
+      for (final doc in snap.docs) {
+        data[doc.id] = doc.data();
+      }
+      if (mounted) setState(() { _scoreData = data; _loadingScores = false; });
+    } catch (e) {
+      debugPrint('loadScores error: $e');
+      if (mounted) setState(() => _loadingScores = false);
+    }
+  }
+
+  // ── Load Analisis Butir Soal ──
+  Future<void> _loadItemAnalysis() async {
+    if (_loadingAnalysis) return;
+    setState(() => _loadingAnalysis = true);
+    try {
+      // Load soal
+      final soalSnap = await FirebaseFirestore.instance
+          .collection('exam').doc(exam.id).collection('soal')
+          .orderBy('nomor').get();
+      final soals = soalSnap.docs.map((d) => SoalModel.fromMap(d.data(), d.id)).toList();
+
+      // Load jawaban
+      final jwbSnap = await FirebaseFirestore.instance
+          .collection('exam').doc(exam.id).collection('jawaban').get();
+
+      // Group jawaban by soalId
+      final Map<String, List<Map<String, dynamic>>> jawabanPerSoal = {};
+      final Map<String, int> nilaiPerSiswa = {};
+      for (final doc in jwbSnap.docs) {
+        final d = doc.data();
+        final soalId = d['soalId']?.toString() ?? '';
+        final siswaId = d['siswaId']?.toString() ?? '';
+        jawabanPerSoal.putIfAbsent(soalId, () => []).add(d);
+        nilaiPerSiswa[siswaId] = (nilaiPerSiswa[siswaId] ?? 0) + ((d['nilaiDapat'] as int?) ?? 0);
+      }
+
+      // Sort siswa by total score for upper/lower group
+      final sortedSiswa = nilaiPerSiswa.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final n = sortedSiswa.length;
+      final groupSize = (n * 0.27).ceil().clamp(1, n);
+      final upperGroup = sortedSiswa.take(groupSize).map((e) => e.key).toSet();
+      final lowerGroup = sortedSiswa.skip(n - groupSize).take(groupSize).map((e) => e.key).toSet();
+
+      // Calculate per-item stats
+      int totalMax = 0;
+      double sumNilai = 0;
+      final List<Map<String, dynamic>> analysis = [];
+      for (final soal in soals) {
+        final jwbList = jawabanPerSoal[soal.id] ?? [];
+        final totalJawab = jwbList.length;
+        final benarCount = jwbList.where((j) => j['benar'] == true).length;
+        totalMax += soal.skor;
+
+        // Difficulty index (P) = benar / total
+        final difficulty = totalJawab > 0 ? benarCount / totalJawab : 0.0;
+
+        // Discrimination index (D) = (upper correct - lower correct) / group size
+        final upperCorrect = jwbList.where((j) =>
+            upperGroup.contains(j['siswaId']?.toString()) && j['benar'] == true).length;
+        final lowerCorrect = jwbList.where((j) =>
+            lowerGroup.contains(j['siswaId']?.toString()) && j['benar'] == true).length;
+        final discrimination = groupSize > 0
+            ? (upperCorrect - lowerCorrect) / groupSize : 0.0;
+
+        // Distractor analysis (PG only)
+        Map<String, int> optionCounts = {};
+        if (soal.tipe == TipeSoal.pilihanGanda) {
+          for (final j in jwbList) {
+            final ans = j['jawaban']?.toString().toUpperCase() ?? '';
+            if (ans.isNotEmpty) optionCounts[ans] = (optionCounts[ans] ?? 0) + 1;
+          }
+        }
+
+        // Quality classification
+        String diffLabel;
+        Color diffColor;
+        if (difficulty < 0.3) {
+          diffLabel = 'Sulit'; diffColor = Colors.red;
+        } else if (difficulty < 0.7) {
+          diffLabel = 'Sedang'; diffColor = Colors.green;
+        } else {
+          diffLabel = 'Mudah'; diffColor = Colors.orange;
+        }
+
+        String discLabel;
+        Color discColor;
+        if (discrimination >= 0.4) {
+          discLabel = 'Sangat Baik'; discColor = Colors.green;
+        } else if (discrimination >= 0.3) {
+          discLabel = 'Baik'; discColor = Colors.blue;
+        } else if (discrimination >= 0.2) {
+          discLabel = 'Cukup'; discColor = Colors.orange;
+        } else {
+          discLabel = 'Buruk'; discColor = Colors.red;
+        }
+
+        analysis.add({
+          'soal': soal,
+          'totalJawab': totalJawab,
+          'benarCount': benarCount,
+          'difficulty': difficulty,
+          'diffLabel': diffLabel,
+          'diffColor': diffColor,
+          'discrimination': discrimination,
+          'discLabel': discLabel,
+          'discColor': discColor,
+          'optionCounts': optionCounts,
+        });
+      }
+
+      // Average score
+      if (nilaiPerSiswa.isNotEmpty) {
+        sumNilai = nilaiPerSiswa.values.fold(0, (a, b) => a + b).toDouble();
+      }
+
+      if (mounted) {
+        setState(() {
+          _itemAnalysis = analysis;
+          _loadingAnalysis = false;
+          _totalMaxSkor = totalMax;
+          _avgNilai = nilaiPerSiswa.isNotEmpty ? sumNilai / nilaiPerSiswa.length : 0;
+        });
+      }
+    } catch (e) {
+      debugPrint('loadItemAnalysis error: $e');
+      if (mounted) setState(() => _loadingAnalysis = false);
+    }
+  }
+
+  // ── Tab Analisis Butir Soal ──
+  Widget _buildAnalisisTab() {
+    if (_loadingAnalysis) {
+      return const Center(child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 12),
+          Text("Menganalisis butir soal...", style: TextStyle(color: Colors.grey)),
+        ],
+      ));
+    }
+    if (_itemAnalysis == null) {
+      return Center(child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.analytics_outlined, size: 60, color: Colors.grey),
+          const SizedBox(height: 12),
+          const Text("Analisis butir soal belum dimuat.",
+              style: TextStyle(color: Colors.grey, fontSize: 14)),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white),
+            onPressed: _loadItemAnalysis,
+            icon: const Icon(Icons.play_arrow),
+            label: const Text("Muat Analisis"),
+          ),
+        ],
+      ));
+    }
+
+    final items = _itemAnalysis!;
+    final goodCount = items.where((i) => (i['discrimination'] as double) >= 0.3).length;
+    final poorCount = items.where((i) => (i['discrimination'] as double) < 0.2).length;
+    final easyCount = items.where((i) => (i['difficulty'] as double) >= 0.7).length;
+    final hardCount = items.where((i) => (i['difficulty'] as double) < 0.3).length;
+    final medCount = items.length - easyCount - hardCount;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Summary cards
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(children: [
+              Row(children: [
+                const Icon(Icons.analytics, color: Color(0xFF0F172A)),
+                const SizedBox(width: 8),
+                const Text("Ringkasan Analisis",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ]),
+              const SizedBox(height: 14),
+              Row(children: [
+                _analysisSummaryCard("Total Soal", "${items.length}", Colors.blue, Icons.quiz),
+                const SizedBox(width: 8),
+                _analysisSummaryCard("Rata-rata", _avgNilai != null
+                    ? "${_avgNilai!.toStringAsFixed(1)}/${_totalMaxSkor ?? 0}" : "-",
+                    Colors.teal, Icons.score),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                _analysisSummaryCard("Soal Baik", "$goodCount", Colors.green, Icons.thumb_up),
+                const SizedBox(width: 8),
+                _analysisSummaryCard("Soal Buruk", "$poorCount", Colors.red, Icons.thumb_down),
+              ]),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // Difficulty distribution
+        Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text("Distribusi Tingkat Kesulitan",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  height: 24,
+                  child: Row(children: [
+                    if (hardCount > 0) Expanded(flex: hardCount, child: Container(
+                      color: Colors.red,
+                      alignment: Alignment.center,
+                      child: Text("$hardCount", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    )),
+                    if (medCount > 0) Expanded(flex: medCount, child: Container(
+                      color: Colors.green,
+                      alignment: Alignment.center,
+                      child: Text("$medCount", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    )),
+                    if (easyCount > 0) Expanded(flex: easyCount, child: Container(
+                      color: Colors.orange,
+                      alignment: Alignment.center,
+                      child: Text("$easyCount", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    )),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                _legendItem(Colors.red, "Sulit", hardCount),
+                const SizedBox(width: 12),
+                _legendItem(Colors.green, "Sedang", medCount),
+                const SizedBox(width: 12),
+                _legendItem(Colors.orange, "Mudah", easyCount),
+              ]),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // Per-item detail list
+        const Text("Detail Per Soal",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 8),
+        ...items.map((item) {
+          final soal = item['soal'] as SoalModel;
+          final difficulty = item['difficulty'] as double;
+          final discrimination = item['discrimination'] as double;
+          final diffLabel = item['diffLabel'] as String;
+          final diffColor = item['diffColor'] as Color;
+          final discLabel = item['discLabel'] as String;
+          final discColor = item['discColor'] as Color;
+          final benar = item['benarCount'] as int;
+          final total = item['totalJawab'] as int;
+          final optCounts = item['optionCounts'] as Map<String, int>;
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // Header
+                Row(children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: const Color(0xFF0F172A),
+                    child: Text("${soal.nomor}",
+                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(
+                    soal.pertanyaan.length > 80
+                        ? "${soal.pertanyaan.substring(0, 80)}..." : soal.pertanyaan,
+                    style: const TextStyle(fontSize: 12),
+                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                  )),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: diffColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(diffLabel,
+                        style: TextStyle(fontSize: 10, color: diffColor, fontWeight: FontWeight.bold)),
+                  ),
+                ]),
+                const SizedBox(height: 10),
+
+                // Stats row
+                Row(children: [
+                  _itemStatChip("P = ${difficulty.toStringAsFixed(2)}", diffColor),
+                  const SizedBox(width: 6),
+                  _itemStatChip("D = ${discrimination.toStringAsFixed(2)}", discColor),
+                  const SizedBox(width: 6),
+                  _itemStatChip("$benar/$total benar", Colors.blueGrey),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: discColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(discLabel,
+                        style: TextStyle(fontSize: 10, color: discColor, fontWeight: FontWeight.w600)),
+                  ),
+                ]),
+
+                // Distractor analysis for PG
+                if (soal.tipe == TipeSoal.pilihanGanda && optCounts.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  const Text("Distribusi Jawaban:",
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey)),
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 6, runSpacing: 4, children: soal.pilihan.map((p) {
+                    final key = p.split('.').first.trim().toUpperCase();
+                    final count = optCounts[key] ?? 0;
+                    final pct = total > 0 ? (count / total * 100) : 0;
+                    final isCorrect = key == soal.kunciJawaban.toUpperCase();
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isCorrect ? Colors.green.shade50 : Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isCorrect ? Colors.green : Colors.grey.shade300,
+                          width: isCorrect ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Text(
+                        "$key: $count (${pct.toStringAsFixed(0)}%)",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: isCorrect ? FontWeight.bold : FontWeight.normal,
+                          color: isCorrect ? Colors.green.shade800 : Colors.grey.shade700,
+                        ),
+                      ),
+                    );
+                  }).toList()),
+                ],
+              ]),
+            ),
+          );
+        }),
+
+        // Export analisis button
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _exportAnalisisCSV,
+            icon: const Icon(Icons.download),
+            label: const Text("Export Analisis Butir Soal (CSV)"),
+          ),
+        ),
+        const SizedBox(height: 40),
+      ]),
+    );
+  }
+
+  Widget _analysisSummaryCard(String label, String value, Color color, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Row(children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 8),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: color)),
+            Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _itemStatChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(text, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  // ── Export Analisis CSV ──
+  void _exportAnalisisCSV() {
+    if (_itemAnalysis == null) return;
+    final buf = StringBuffer();
+    buf.writeln("No,Pertanyaan,Tipe,Kunci,Skor,Tingkat Kesulitan (P),Klasifikasi,Daya Pembeda (D),Klasifikasi D,Benar,Total,Distribusi Jawaban");
+    for (final item in _itemAnalysis!) {
+      final soal = item['soal'] as SoalModel;
+      final d = item['difficulty'] as double;
+      final disc = item['discrimination'] as double;
+      final benar = item['benarCount'] as int;
+      final total = item['totalJawab'] as int;
+      final optCounts = item['optionCounts'] as Map<String, int>;
+      final distrib = optCounts.entries.map((e) => "${e.key}:${e.value}").join("|");
+      final pertanyaan = soal.pertanyaan.replaceAll('"', '""').replaceAll('\n', ' ');
+      buf.writeln('"${soal.nomor}","$pertanyaan","${soal.tipe.name}","${soal.kunciJawaban}","${soal.skor}","${d.toStringAsFixed(3)}","${item['diffLabel']}","${disc.toStringAsFixed(3)}","${item['discLabel']}","$benar","$total","$distrib"');
+    }
+    buf.writeln('');
+    buf.writeln('"RINGKASAN ANALISIS"');
+    buf.writeln('"Rata-rata Nilai","${_avgNilai?.toStringAsFixed(1) ?? "-"} / ${_totalMaxSkor ?? 0}"');
+    buf.writeln('"Total Soal","${_itemAnalysis!.length}"');
+    buf.writeln('"Soal Baik (D>=0.3)","${_itemAnalysis!.where((i) => (i['discrimination'] as double) >= 0.3).length}"');
+    buf.writeln('"Soal Buruk (D<0.2)","${_itemAnalysis!.where((i) => (i['discrimination'] as double) < 0.2).length}"');
+    Clipboard.setData(ClipboardData(text: buf.toString()));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("Data analisis butir soal disalin ke clipboard!"),
+      backgroundColor: Colors.green,
+      duration: Duration(seconds: 4),
+    ));
+  }
+
+  // ── Export PDF Rapor Ujian ──
+  Future<void> _exportPDF(List<UserAccount> peserta) async {
+    // Ensure scores loaded
+    if (_scoreData == null) {
+      await _loadScores();
+    }
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("Menyiapkan PDF..."),
+      backgroundColor: Colors.blue,
+      duration: Duration(seconds: 2),
+    ));
+
+    final pdf = pw.Document();
+    final dateStr = DateFormat('dd MMMM yyyy, HH:mm', 'id').format(DateTime.now());
+
+    // Collect score list for summary
+    final List<_PdfSiswaRow> rows = [];
+    for (final s in peserta) {
+      final status = _statusForExam(s);
+      final sd = _scoreData?[s.id];
+      final nilai = sd != null ? ((sd['totalNilai'] as num?)?.toDouble() ?? 0) : 0.0;
+      final benar = sd != null ? ((sd['totalBenar'] as num?)?.toInt() ?? 0) : 0;
+      final totalSoal = sd != null ? ((sd['totalSoal'] as num?)?.toInt() ?? 0) : 0;
+      final vCount = s.violationForExam(exam.id);
+      rows.add(_PdfSiswaRow(
+        nama: s.nama, kode: s.kode, kelas: s.classFolder, ruang: s.ruang,
+        status: status, nilai: nilai, benar: benar, totalSoal: totalSoal, violations: vCount,
+      ));
+    }
+    rows.sort((a, b) => b.nilai.compareTo(a.nilai));
+
+    final selesai = rows.where((r) => r.status == 'selesai').length;
+    final scores = rows.where((r) => r.nilai > 0).map((r) => r.nilai).toList()..sort();
+    final avg = scores.isNotEmpty ? scores.reduce((a, b) => a + b) / scores.length : 0.0;
+    final maxScore = scores.isNotEmpty ? scores.last : 0.0;
+    final minScore = scores.isNotEmpty ? scores.first : 0.0;
+
+    // Page 1: Summary
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(40),
+      header: (ctx) => pw.Column(children: [
+        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+          pw.Text('LAPORAN HASIL UJIAN', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Text(dateStr, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+        ]),
+        pw.Divider(thickness: 2),
+        pw.SizedBox(height: 8),
+      ]),
+      footer: (ctx) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+        pw.Text('Asesment SMP BMS', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+        pw.Text('Hal ${ctx.pageNumber}/${ctx.pagesCount}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+      ]),
+      build: (ctx) => [
+        // Exam info
+        pw.Container(
+          padding: const pw.EdgeInsets.all(12),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey100,
+            borderRadius: pw.BorderRadius.circular(8),
+          ),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text(exam.judul, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 4),
+            pw.Row(children: [
+              pw.Text('Mapel: ${exam.mapel}', style: const pw.TextStyle(fontSize: 10)),
+              pw.SizedBox(width: 20),
+              pw.Text('Jenjang: ${exam.jenjang}', style: const pw.TextStyle(fontSize: 10)),
+            ]),
+            pw.Row(children: [
+              pw.Text('Waktu: ${DateFormat('dd/MM/yyyy HH:mm').format(exam.waktuMulai)} - ${DateFormat('HH:mm').format(exam.waktuSelesai)}', style: const pw.TextStyle(fontSize: 10)),
+              pw.SizedBox(width: 20),
+              pw.Text('Durasi: ${exam.waktuSelesai.difference(exam.waktuMulai).inMinutes} menit', style: const pw.TextStyle(fontSize: 10)),
+            ]),
+            if (exam.kkm > 0 || exam.spiType != 'reguler')
+              pw.Row(children: [
+                if (exam.kkm > 0) pw.Text('KKM: ${exam.kkm}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                if (exam.kkm > 0 && exam.spiType != 'reguler') pw.SizedBox(width: 20),
+                if (exam.spiType != 'reguler') pw.Text('Tipe: ${exam.spiType[0].toUpperCase()}${exam.spiType.substring(1)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: exam.spiType == 'remedial' ? PdfColors.deepOrange : PdfColors.indigo)),
+              ]),
+          ]),
+        ),
+        pw.SizedBox(height: 16),
+
+        // Stats summary
+        pw.Row(children: [
+          _pdfStatBox('Total Peserta', '${peserta.length}', PdfColors.blue),
+          pw.SizedBox(width: 8),
+          _pdfStatBox('Selesai', '$selesai', PdfColors.green),
+          pw.SizedBox(width: 8),
+          _pdfStatBox('Rata-rata', avg.toStringAsFixed(1), PdfColors.teal),
+          pw.SizedBox(width: 8),
+          _pdfStatBox('Tertinggi', maxScore.toStringAsFixed(0), PdfColors.green800),
+          pw.SizedBox(width: 8),
+          _pdfStatBox('Terendah', minScore.toStringAsFixed(0), PdfColors.red),
+        ]),
+        pw.SizedBox(height: 16),
+
+        // Table
+        pw.Text('Daftar Nilai Peserta', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 8),
+        pw.TableHelper.fromTextArray(
+          headerStyle: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+          headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF0F172A)),
+          cellStyle: const pw.TextStyle(fontSize: 8),
+          cellAlignment: pw.Alignment.centerLeft,
+          headerAlignments: {
+            0: pw.Alignment.center, 1: pw.Alignment.centerLeft,
+            2: pw.Alignment.center, 3: pw.Alignment.center,
+            4: pw.Alignment.center, 5: pw.Alignment.center,
+            6: pw.Alignment.center, 7: pw.Alignment.center,
+            if (exam.kkm > 0) 8: pw.Alignment.center,
+          },
+          columnWidths: {
+            0: const pw.FixedColumnWidth(28),
+            1: const pw.FlexColumnWidth(3),
+            2: const pw.FixedColumnWidth(50),
+            3: const pw.FixedColumnWidth(35),
+            4: const pw.FixedColumnWidth(35),
+            5: const pw.FixedColumnWidth(50),
+            6: const pw.FixedColumnWidth(55),
+            7: const pw.FixedColumnWidth(50),
+            if (exam.kkm > 0) 8: const pw.FixedColumnWidth(45),
+          },
+          headers: ['No', 'Nama', 'Kode', 'Kelas', 'Ruang', 'Nilai', 'Benar/Total', 'Status', if (exam.kkm > 0) 'KKM'],
+          data: rows.asMap().entries.map((e) {
+            final i = e.key;
+            final r = e.value;
+            return [
+              '${i + 1}',
+              r.nama,
+              r.kode,
+              r.kelas,
+              r.ruang,
+              r.nilai.toStringAsFixed(0),
+              '${r.benar}/${r.totalSoal}',
+              r.status == 'selesai' ? 'Selesai' : r.status == 'melanggar' ? 'Melanggar' : r.status == 'mengerjakan' ? 'Ujian' : 'Belum',
+              if (exam.kkm > 0) r.nilai >= exam.kkm ? 'Tuntas' : 'BT',
+            ];
+          }).toList(),
+        ),
+      ],
+    ));
+
+    try {
+      await Printing.layoutPdf(
+        onLayout: (format) => pdf.save(),
+        name: 'Rapor_${exam.judul.replaceAll(' ', '_')}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Error exporting PDF: $e"),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
+  pw.Widget _pdfStatBox(String label, String value, PdfColor color) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.all(8),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: color, width: 1),
+          borderRadius: pw.BorderRadius.circular(6),
+        ),
+        child: pw.Column(children: [
+          pw.Text(value, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: color)),
+          pw.SizedBox(height: 2),
+          pw.Text(label, style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey700)),
+        ]),
+      ),
+    );
+  }
+
+  // ── Laporan Proktor (rekap pelanggaran) ──
+  Future<void> _exportProktorReport(List<UserAccount> peserta) async {
+    final pelanggar = <Map<String, dynamic>>[];
+    for (final s in peserta) {
+      final vCount = s.violationForExam(exam.id);
+      if (vCount <= 0) continue;
+      final rawExam = s.examStatus[exam.id];
+      final lastReason = (rawExam is Map && rawExam['lastViolationReason'] != null)
+          ? rawExam['lastViolationReason'].toString() : '';
+      final proktorCount = (rawExam is Map && rawExam['proktorUnlockCount'] is int)
+          ? rawExam['proktorUnlockCount'] as int : 0;
+      pelanggar.add({
+        'siswa': s,
+        'violations': vCount,
+        'lastReason': lastReason,
+        'proktorUnlock': proktorCount,
+      });
+    }
+    pelanggar.sort((a, b) => (b['violations'] as int).compareTo(a['violations'] as int));
+
+    if (pelanggar.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Tidak ada pelanggaran ditemukan."),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    final pdf = pw.Document();
+    final dateStr = DateFormat('dd MMMM yyyy, HH:mm', 'id').format(DateTime.now());
+
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(40),
+      header: (ctx) => pw.Column(children: [
+        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+          pw.Text('LAPORAN PROKTOR - REKAP PELANGGARAN', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          pw.Text(dateStr, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+        ]),
+        pw.Divider(thickness: 2),
+        pw.SizedBox(height: 8),
+      ]),
+      footer: (ctx) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+        pw.Text('Asesment SMP BMS', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+        pw.Text('Hal ${ctx.pageNumber}/${ctx.pagesCount}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+      ]),
+      build: (ctx) => [
+        // Exam info
+        pw.Container(
+          padding: const pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(color: PdfColors.red50, borderRadius: pw.BorderRadius.circular(6)),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text('Ujian: ${exam.judul}', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Mapel: ${exam.mapel} | Jenjang: ${exam.jenjang}', style: const pw.TextStyle(fontSize: 9)),
+            pw.Text('Total Pelanggar: ${pelanggar.length} dari ${peserta.length} peserta', style: const pw.TextStyle(fontSize: 9)),
+          ]),
+        ),
+        pw.SizedBox(height: 14),
+
+        pw.Text('Daftar Pelanggaran', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 8),
+        pw.TableHelper.fromTextArray(
+          headerStyle: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+          headerDecoration: const pw.BoxDecoration(color: PdfColors.red800),
+          cellStyle: const pw.TextStyle(fontSize: 8),
+          cellAlignment: pw.Alignment.centerLeft,
+          columnWidths: {
+            0: const pw.FixedColumnWidth(24),
+            1: const pw.FlexColumnWidth(3),
+            2: const pw.FixedColumnWidth(45),
+            3: const pw.FixedColumnWidth(35),
+            4: const pw.FixedColumnWidth(35),
+            5: const pw.FixedColumnWidth(55),
+            6: const pw.FlexColumnWidth(2.5),
+          },
+          headers: ['No', 'Nama', 'Kode', 'Kelas', 'Langgar', 'Proktor PIN', 'Alasan Terakhir'],
+          data: pelanggar.asMap().entries.map((e) {
+            final i = e.key;
+            final p = e.value;
+            final s = p['siswa'] as UserAccount;
+            return [
+              '${i + 1}',
+              s.nama,
+              s.kode,
+              s.classFolder,
+              '${p['violations']}',
+              '${p['proktorUnlock']}x',
+              (p['lastReason'] as String).isEmpty ? '-' : p['lastReason'] as String,
+            ];
+          }).toList(),
+        ),
+      ],
+    ));
+
+    try {
+      await Printing.layoutPdf(
+        onLayout: (format) => pdf.save(),
+        name: 'Proktor_${exam.judul.replaceAll(' ', '_')}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Error exporting proktor PDF: $e"),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
+  // ── Buat Ujian Remedial / Susulan ──
+  Future<void> _createRemedialExam(List<UserAccount> peserta, Map<String, double> scores) async {
+    final exam = widget.exam;
+    final tidakTuntas = <UserAccount>[];
+    for (final s in peserta) {
+      final nilai = scores[s.id] ?? 0;
+      if (nilai < exam.kkm) tidakTuntas.add(s);
+    }
+
+    if (tidakTuntas.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Semua siswa sudah tuntas!"),
+          backgroundColor: Colors.green,
+        ));
+      }
+      return;
+    }
+
+    // Show confirmation dialog
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Buat Ujian Lanjutan"),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text("${tidakTuntas.length} siswa belum tuntas (KKM: ${exam.kkm})."),
+          const SizedBox(height: 12),
+          const Text("Pilih tipe sesi:", style: TextStyle(fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              icon: const Icon(Icons.event_repeat, size: 16),
+              label: const Text("Remedial"),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.deepOrange),
+              onPressed: () => Navigator.pop(ctx, 'remedial'),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: OutlinedButton.icon(
+              icon: const Icon(Icons.schedule, size: 16),
+              label: const Text("Susulan"),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.blue),
+              onPressed: () => Navigator.pop(ctx, 'susulan'),
+            )),
+          ]),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Batal")),
+        ],
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    // Pick date and time for new exam
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (pickedDate == null || !mounted) return;
+
+    final pickedStart = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(exam.waktuMulai),
+    );
+    if (pickedStart == null || !mounted) return;
+
+    final pickedEnd = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(exam.waktuSelesai),
+    );
+    if (pickedEnd == null || !mounted) return;
+
+    final newStart = DateTime(pickedDate.year, pickedDate.month, pickedDate.day,
+        pickedStart.hour, pickedStart.minute);
+    final newEnd = DateTime(pickedDate.year, pickedDate.month, pickedDate.day,
+        pickedEnd.hour, pickedEnd.minute);
+
+    if (newEnd.isBefore(newStart)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Waktu selesai harus setelah waktu mulai!"),
+          backgroundColor: Colors.red,
+        ));
+      }
+      return;
+    }
+
+    try {
+      // Create new exam document
+      final newExamData = {
+        'judul': '${result == 'remedial' ? '[Remedial]' : '[Susulan]'} ${exam.judul}',
+        'mapel': exam.mapel,
+        'jenjang': exam.jenjang,
+        'antiCurang': exam.antiCurang,
+        'maxCurang': exam.maxCurang,
+        'kameraAktif': exam.kameraAktif,
+        'autoSubmit': exam.autoSubmit,
+        'waktuMulai': Timestamp.fromDate(newStart),
+        'waktuSelesai': Timestamp.fromDate(newEnd),
+        'instruksi': exam.instruksi,
+        'link': exam.link,
+        'mode': exam.mode,
+        'jumlahSoal': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+        'status': 'draft',
+        'kategori': exam.kategori,
+        'creatorName': exam.creatorName,
+        'targetKelas': exam.targetKelas,
+        'kkm': exam.kkm,
+        'spiType': result,
+        'parentExamId': exam.id,
+      };
+
+      final newDoc = await FirebaseFirestore.instance.collection('exam').add(newExamData);
+
+      // Copy soal from parent exam
+      if (exam.mode == 'native') {
+        final soalSnap = await FirebaseFirestore.instance
+            .collection('exam').doc(exam.id).collection('soal')
+            .orderBy('nomor').get();
+        final batch = FirebaseFirestore.instance.batch();
+        for (final d in soalSnap.docs) {
+          batch.set(
+            FirebaseFirestore.instance.collection('exam').doc(newDoc.id).collection('soal').doc(d.id),
+            d.data(),
+          );
+        }
+        await batch.commit();
+        await FirebaseFirestore.instance.collection('exam').doc(newDoc.id).update({
+          'jumlahSoal': soalSnap.docs.length,
+        });
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Ujian ${result == 'remedial' ? 'remedial' : 'susulan'} berhasil dibuat untuk ${tidakTuntas.length} siswa!"),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Gagal membuat ujian: $e"),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(exam.judul),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (exam.spiType == 'remedial') ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(color: Colors.deepOrange, borderRadius: BorderRadius.circular(6)),
+              child: const Text("R", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+            ),
+          ] else if (exam.spiType == 'susulan') ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(color: Colors.indigo, borderRadius: BorderRadius.circular(6)),
+              child: const Text("S", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+            ),
+          ],
+          Flexible(child: Text(exam.judul, overflow: TextOverflow.ellipsis)),
+        ]),
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: Colors.white,
         actions: [
@@ -7597,18 +9013,18 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
 
           final all = snap.data!.docs.map((d) => UserAccount.fromFirestore(d)).toList();
           final peserta = all.where((s) => s.matchJenjang(exam.jenjang)).toList();
-          final selesai = peserta.where((s) => s.statusMengerjakan == 'selesai').toList();
-          final melanggar = peserta.where((s) => s.statusMengerjakan == 'melanggar').toList();
-          final mengerjakan = peserta.where((s) => s.statusMengerjakan == 'mengerjakan').toList();
-          final belum = peserta.where((s) => s.statusMengerjakan == 'belum mulai').toList();
+          final selesai = peserta.where((s) => _statusForExam(s) == 'selesai').toList();
+          final melanggar = peserta.where((s) => _statusForExam(s) == 'melanggar').toList();
+          final mengerjakan = peserta.where((s) => _statusForExam(s) == 'mengerjakan').toList();
+          final belum = peserta.where((s) => _statusForExam(s) == 'belum mulai').toList();
 
           var filtered = peserta.where((s) {
             final matchSearch = _search.isEmpty ||
                 s.nama.toLowerCase().contains(_search.toLowerCase()) ||
                 s.kode.toLowerCase().contains(_search.toLowerCase());
             final matchStatus = _filterStatus == 'semua' ||
-                (_filterStatus == 'belum' && s.statusMengerjakan == 'belum mulai') ||
-                s.statusMengerjakan == _filterStatus;
+                (_filterStatus == 'belum' && _statusForExam(s) == 'belum mulai') ||
+                _statusForExam(s) == _filterStatus;
             return matchSearch && matchStatus;
           }).toList();
 
@@ -7647,8 +9063,17 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                   onSelected: (v) {
                     if (v == 'extend') _extendWaktu();
                     if (v == 'reset') _resetSemua(peserta);
+                    if (v == 'pdf_rapor') _exportPDF(peserta);
+                    if (v == 'pdf_proktor') _exportProktorReport(peserta);
                   },
                   itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'pdf_rapor', child: Row(children: [
+                      Icon(Icons.picture_as_pdf, color: Colors.red), SizedBox(width: 8), Text("Export PDF Rapor"),
+                    ])),
+                    const PopupMenuItem(value: 'pdf_proktor', child: Row(children: [
+                      Icon(Icons.security, color: Colors.orange), SizedBox(width: 8), Text("Laporan Proktor"),
+                    ])),
+                    const PopupMenuDivider(),
                     const PopupMenuItem(value: 'extend', child: Row(children: [
                       Icon(Icons.timer, color: Colors.blue), SizedBox(width: 8), Text("Tambah Waktu Ujian"),
                     ])),
@@ -7712,12 +9137,41 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                     ),
                   ),
                 ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() => _tabIndex = 2);
+                      if (_itemAnalysis == null && !_loadingAnalysis) _loadItemAnalysis();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border(bottom: BorderSide(
+                          color: _tabIndex == 2 ? const Color(0xFF0F172A) : Colors.transparent,
+                          width: 2,
+                        )),
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.analytics,
+                            color: _tabIndex == 2 ? const Color(0xFF0F172A) : Colors.grey,
+                            size: 18),
+                        const SizedBox(width: 6),
+                        Text("Analisis",
+                            style: TextStyle(
+                                color: _tabIndex == 2 ? const Color(0xFF0F172A) : Colors.grey,
+                                fontWeight: _tabIndex == 2 ? FontWeight.bold : FontWeight.normal)),
+                      ]),
+                    ),
+                  ),
+                ),
               ]),
             ),
 
             // Tab content
             Expanded(
-              child: _tabIndex == 1
+              child: _tabIndex == 2
+                  ? _buildAnalisisTab()
+                  : _tabIndex == 1
                   ? _buildStatistikTab(peserta)
                   : Column(children: [
                 // Filter bar
@@ -7812,9 +9266,9 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                       else
                         ...sortedKeys.map((kelas) {
                           final siswaKelas = grouped[kelas]!;
-                          final sK = siswaKelas.where((s) => s.statusMengerjakan == 'selesai').length;
-                          final lK = siswaKelas.where((s) => s.statusMengerjakan == 'melanggar').length;
-                          final mK = siswaKelas.where((s) => s.statusMengerjakan == 'mengerjakan').length;
+                          final sK = siswaKelas.where((s) => _statusForExam(s) == 'selesai').length;
+                          final lK = siswaKelas.where((s) => _statusForExam(s) == 'melanggar').length;
+                          final mK = siswaKelas.where((s) => _statusForExam(s) == 'mengerjakan').length;
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -7837,14 +9291,103 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                                 final sc = _statusColor(s.statusMengerjakan);
                                 final si = _statusIcon(s.statusMengerjakan);
                                 final sl = _statusLabel(s.statusMengerjakan);
+                                // Get violation data for this exam
+                                final vCount = s.violationForExam(exam.id);
+                                final rawExam = s.examStatus[exam.id];
+                                final proktorCount = (rawExam is Map && rawExam['proktorUnlockCount'] is int)
+                                    ? rawExam['proktorUnlockCount'] as int : 0;
+                                final lastReason = (rawExam is Map && rawExam['lastViolationReason'] != null)
+                                    ? rawExam['lastViolationReason'].toString() : '';
                                 return ListTile(
                                   dense: true,
                                   leading: CircleAvatar(
                                       backgroundColor: sc,
                                       child: const Icon(Icons.person, color: Colors.white, size: 16)),
-                                  title: Text(s.nama, style: const TextStyle(fontSize: 13)),
-                                  subtitle: Text("Kode: ${s.kode}  •  Ruang: ${s.ruang}",
-                                      style: const TextStyle(fontSize: 11)),
+                                  title: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(s.nama, style: const TextStyle(fontSize: 13)),
+                                      ),
+                                      // Violation badges next to name
+                                      if (vCount > 0)
+                                        Container(
+                                          margin: const EdgeInsets.only(left: 4),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.shade100,
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.red.shade300),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.warning, size: 10, color: Colors.red.shade700),
+                                              const SizedBox(width: 2),
+                                              Text('$vCount', style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ),
+                                        ),
+                                      if (proktorCount > 0)
+                                        Container(
+                                          margin: const EdgeInsets.only(left: 4),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange.shade100,
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.orange.shade300),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.vpn_key, size: 10, color: Colors.orange.shade700),
+                                              const SizedBox(width: 2),
+                                              Text('$proktorCount', style: TextStyle(fontSize: 10, color: Colors.orange.shade700, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  subtitle: Builder(builder: (_) {
+                                    final sd = _scoreData?[s.id];
+                                    final nilai = sd != null ? ((sd['totalNilai'] as num?)?.toDouble() ?? 0) : 0.0;
+                                    final hasScore = sd != null && nilai > 0;
+                                    final isTuntas = hasScore && exam.kkm > 0 && nilai >= exam.kkm;
+                                    final isTidakTuntas = hasScore && exam.kkm > 0 && nilai < exam.kkm;
+                                    return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(children: [
+                                        Expanded(child: Text("Kode: ${s.kode}  •  Ruang: ${s.ruang}",
+                                            style: const TextStyle(fontSize: 11))),
+                                        if (hasScore) ...[
+                                          Text("${nilai.toStringAsFixed(0)}",
+                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                                                  color: isTidakTuntas ? Colors.red : Colors.green.shade700)),
+                                          if (exam.kkm > 0) ...[
+                                            const SizedBox(width: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: isTuntas ? Colors.green.shade50 : Colors.red.shade50,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: isTuntas ? Colors.green.shade300 : Colors.red.shade300),
+                                              ),
+                                              child: Text(isTuntas ? "T" : "BT",
+                                                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold,
+                                                      color: isTuntas ? Colors.green.shade700 : Colors.red.shade700)),
+                                            ),
+                                          ],
+                                        ],
+                                      ]),
+                                      // Show last violation reason if any
+                                      if (lastReason.isNotEmpty)
+                                        Text(
+                                          "Alasan: $lastReason",
+                                          style: TextStyle(fontSize: 10, color: Colors.red.shade600, fontStyle: FontStyle.italic),
+                                        ),
+                                    ],
+                                  );
+                                  }),
                                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -8929,6 +10472,9 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 6, runSpacing: 4, children: [
+          if (e.spiType == 'remedial') _adminExamBadge('Remedial', Colors.deepOrange.shade50, Colors.deepOrange),
+          if (e.spiType == 'susulan') _adminExamBadge('Susulan', Colors.indigo.shade50, Colors.indigo),
+          if (e.kkm > 0) _adminExamBadge('KKM ${e.kkm}', Colors.teal.shade50, Colors.teal),
           if (e.kategori.isNotEmpty) _adminExamBadge(e.kategori, Colors.purple.shade100, Colors.purple.shade700),
           _adminExamBadge(isNativeMode ? 'Via Aplikasi' : 'Via Google Form', Colors.blue.shade50, Colors.blue.shade600),
           if (!isDraft) _adminExamBadge(DateFormat('dd MMM, HH:mm').format(e.waktuMulai) + ' — ' + DateFormat('HH:mm').format(e.waktuSelesai), Colors.grey.shade100, Colors.grey.shade600),
@@ -10320,7 +11866,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _tokenCtrl = TextEditingController();
-  ExamData? _exam;
+  List<ExamData> _availableExams = [];
   bool _loading = true;
   CameraController? _cam;
   bool _camReady = false;
@@ -10349,16 +11895,12 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
         .listen((snap) async {
       if (!mounted) return;
       final list = snap.docs.map((d) => ExamData.fromFirestore(d)).toList();
-      ExamData? found;
-      try {
-        found = list.firstWhere((e) =>
-        e.isOngoing && widget.user.matchJenjang(e.jenjang));
-      } catch (_) {
-        found = null;
-      }
+      // Cari SEMUA ujian yang sedang berlangsung dan cocok dengan jenjang siswa
+      final found = list.where((e) =>
+        e.isOngoing && widget.user.matchJenjang(e.jenjang)).toList();
 
       // Auto-reset: jika tidak ada ujian aktif tapi status masih "mengerjakan"
-      if (found == null && widget.user.statusMengerjakan == 'mengerjakan') {
+      if (found.isEmpty && widget.user.statusMengerjakan == 'mengerjakan') {
         await FirebaseFirestore.instance
             .collection('users')
             .doc(widget.user.id)
@@ -10367,7 +11909,7 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
 
       if (!mounted) return;
       setState(() {
-        _exam = found;
+        _availableExams = found;
         _loading = false;
       });
     });
@@ -10840,13 +12382,28 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
                           userSnap.data!.exists &&
                           (userSnap.data!.data() as Map?)?['status_mengerjakan'] == 'selesai';
 
-                      if (_exam != null && sudahSelesai) {
-                        // Ujian ada tapi siswa sudah selesai
-                        return _sudahSelesaiCard(_exam!);
+                      // Cek status per-ujian dari exam_status
+                      final examStatusMap = (userSnap.data!.data() as Map?)?['exam_status'] as Map<String, dynamic>? ?? {};
+                      
+                      // Filter ujian yang belum selesai untuk siswa ini
+                      final availableExams = _availableExams.where((e) {
+                        final status = examStatusMap[e.id]?['status'] ?? 'belum mulai';
+                        return status != 'selesai';
+                      }).toList();
+                      
+                      // Filter ujian yang sudah selesai
+                      final completedExams = _availableExams.where((e) {
+                        final status = examStatusMap[e.id]?['status'] ?? 'belum mulai';
+                        return status == 'selesai';
+                      }).toList();
+
+                      if (availableExams.isEmpty && completedExams.isNotEmpty) {
+                        // Semua ujian sudah selesai - tampilkan card selesai untuk ujian terakhir
+                        return _sudahSelesaiCard(completedExams.last);
                       }
 
                       return Column(children: [
-                        if (_exam != null) ...[
+                        if (availableExams.isNotEmpty) ...[
                           // Label
                           const Align(
                             alignment: Alignment.centerLeft,
@@ -10856,236 +12413,9 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
                                     fontSize: 15)),
                           ),
                           const SizedBox(height: 10),
-
-                          // Exam Card
-                          Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [
-                                  Color(0xFF1565C0),
-                                  Color(0xFF0D47A1)
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.blue
-                                        .withValues(alpha: 0.3),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 6)),
-                              ],
-                            ),
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white
-                                        .withValues(alpha: 0.2),
-                                    borderRadius:
-                                    BorderRadius.circular(20),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.fiber_manual_record,
-                                          color: Colors.greenAccent,
-                                          size: 9),
-                                      SizedBox(width: 4),
-                                      Text("SEDANG BERLANGSUNG",
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 9,
-                                              fontWeight:
-                                              FontWeight.bold)),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(_exam!.judul,
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 4),
-                                Text(_exam!.mapel,
-                                    style: TextStyle(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.8),
-                                        fontSize: 14)),
-                                const SizedBox(height: 14),
-                                Row(children: [
-                                  const Icon(Icons.access_time,
-                                      color: Colors.white70, size: 15),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                      "${DateFormat('HH:mm').format(_exam!.waktuMulai)} — ${DateFormat('HH:mm').format(_exam!.waktuSelesai)}",
-                                      style: const TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 12)),
-                                ]),
-                                // Countdown
-                                Builder(builder: (_) {
-                                  final sisa = _exam!.waktuSelesai
-                                      .difference(now);
-                                  final jam = sisa.inHours;
-                                  final mnt =
-                                  sisa.inMinutes.remainder(60);
-                                  return Padding(
-                                    padding: const EdgeInsets.only(top: 5),
-                                    child: Row(children: [
-                                      const Icon(Icons.timer_outlined,
-                                          color: Colors.amber, size: 15),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                          jam > 0
-                                              ? "Sisa $jam jam $mnt menit"
-                                              : "Sisa $mnt menit lagi",
-                                          style: const TextStyle(
-                                              color: Colors.amber,
-                                              fontSize: 12,
-                                              fontWeight:
-                                              FontWeight.w600)),
-                                    ]),
-                                  );
-                                }),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Instruksi
-                          if (_exam!.instruksi.isNotEmpty)
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: Colors.amber.shade200),
-                              ),
-                              child: Row(
-                                crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                                children: [
-                                  const Icon(Icons.info_outline,
-                                      color: Colors.orange, size: 17),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                      child: Text(_exam!.instruksi,
-                                          style: const TextStyle(
-                                              color: Colors.orange,
-                                              fontSize: 13))),
-                                ],
-                              ),
-                            ),
-
-                          const SizedBox(height: 16),
-
-                          // Info banner khusus Windows
-                          if (isWindows)
-                            Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.blue.shade200),
-                              ),
-                              child: const Row(children: [
-                                Icon(Icons.computer, color: Colors.blue, size: 16),
-                                SizedBox(width: 8),
-                                Expanded(child: Text(
-                                  'Mode Windows: Kamera tidak tersedia. '
-                                      'Shortcut sistem diblokir saat ujian.',
-                                  style: TextStyle(color: Colors.blue, fontSize: 11),
-                                )),
-                              ]),
-                            ),
-
-                          // Input Token
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black
-                                        .withValues(alpha: 0.05),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 3)),
-                              ],
-                            ),
-                            padding: const EdgeInsets.all(20),
-                            child: Column(children: [
-                              const Row(
-                                mainAxisAlignment:
-                                MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.vpn_key,
-                                      color: Color(0xFF0F172A),
-                                      size: 17),
-                                  SizedBox(width: 6),
-                                  Text("Masukkan Token Ujian",
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14)),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              TextField(
-                                controller: _tokenCtrl,
-                                textAlign: TextAlign.center,
-                                keyboardType: TextInputType.number,
-                                maxLength: 6,
-                                style: const TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 8),
-                                decoration: InputDecoration(
-                                  counterText: "",
-                                  hintText: "······",
-                                  hintStyle: const TextStyle(
-                                      letterSpacing: 8,
-                                      color: Colors.grey),
-                                  border: OutlineInputBorder(
-                                      borderRadius:
-                                      BorderRadius.circular(12)),
-                                  filled: true,
-                                  fillColor: Colors.grey.shade50,
-                                ),
-                              ),
-                              const SizedBox(height: 14),
-                              SizedBox(
-                                width: double.infinity,
-                                height: 52,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                    const Color(0xFF0F172A),
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                        BorderRadius.circular(12)),
-                                  ),
-                                  icon: const Icon(
-                                      Icons.play_arrow_rounded),
-                                  label: const Text("MULAI UJIAN",
-                                      style: TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.bold)),
-                                  onPressed: _startExam,
-                                ),
-                              ),
-                            ]),
-                          ),
+                          
+                          // List of available exams
+                          ...availableExams.map((exam) => _buildExamCard(exam)),
                         ] else ...[
                           // Tidak ada ujian
                           Container(
@@ -11209,6 +12539,266 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
     );
   }
 
+  // Build individual exam card for student
+  Widget _buildExamCard(ExamData exam) {
+    final now = DateTime.now();
+    final tokenCtrl = TextEditingController();
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Exam info card
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1565C0), Color(0xFF0D47A1)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.blue.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6)),
+              ],
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.fiber_manual_record, color: Colors.greenAccent, size: 9),
+                      SizedBox(width: 4),
+                      Text("SEDANG BERLANGSUNG",
+                          style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(exam.judul,
+                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text(exam.mapel,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 14)),
+                const SizedBox(height: 14),
+                Row(children: [
+                  const Icon(Icons.access_time, color: Colors.white70, size: 15),
+                  const SizedBox(width: 5),
+                  Text("${DateFormat('HH:mm').format(exam.waktuMulai)} — ${DateFormat('HH:mm').format(exam.waktuSelesai)}",
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+                Builder(builder: (_) {
+                  final sisa = exam.waktuSelesai.difference(now);
+                  final jam = sisa.inHours;
+                  final mnt = sisa.inMinutes.remainder(60);
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Row(children: [
+                      const Icon(Icons.timer_outlined, color: Colors.amber, size: 15),
+                      const SizedBox(width: 5),
+                      Text(jam > 0 ? "Sisa $jam jam $mnt menit" : "Sisa $mnt menit lagi",
+                          style: const TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ]),
+                  );
+                }),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 12),
+          
+          // Instruksi
+          if (exam.instruksi.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.orange, size: 17),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Text(exam.instruksi,
+                          style: const TextStyle(color: Colors.orange, fontSize: 13))),
+                ],
+              ),
+            ),
+          
+          if (exam.instruksi.isNotEmpty) const SizedBox(height: 16),
+          
+          // Input Token
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3)),
+              ],
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(children: [
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.vpn_key, color: Color(0xFF0F172A), size: 17),
+                  SizedBox(width: 6),
+                  Text("Masukkan Token Ujian",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: tokenCtrl,
+                textAlign: TextAlign.center,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 8),
+                decoration: InputDecoration(
+                  counterText: "",
+                  hintText: "······",
+                  hintStyle: const TextStyle(letterSpacing: 8, color: Colors.grey),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F172A),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text("MULAI UJIAN", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  onPressed: () => _startExamFor(exam, tokenCtrl.text.trim()),
+                ),
+              ),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Start specific exam with token
+  void _startExamFor(ExamData exam, String tokenInput) async {
+    if (tokenInput.isEmpty) {
+      _snack("Masukkan token ujian terlebih dahulu!", Colors.orange);
+      return;
+    }
+    
+    // Debug: print input token
+    print("DEBUG: Input token = '$tokenInput'");
+    
+    final ts = await FirebaseFirestore.instance
+        .collection('settings').doc('exam_token').get();
+    String serverToken = "";
+    if (!ts.exists) {
+      _snack("Token ujian tidak ditemukan! Silakan hubungi admin.", Colors.red);
+      return;
+    } else {
+      serverToken = (ts.data() as Map)['current_token']?.toString() ?? "";
+      print("DEBUG: Server token = '$serverToken'");
+    }
+    
+    print("DEBUG: Comparing '$tokenInput' == '$serverToken'");
+    if (tokenInput.trim() == serverToken.trim()) {
+      if (mounted) {
+        final examDoc = await FirebaseFirestore.instance.collection('exam').doc(exam.id).get();
+        final isNative = (examDoc.data() as Map?)?['mode'] == 'native';
+
+        if (kIsWeb && exam.antiCurang) {
+          final confirmed = await _showWebGuidedAccessConfirmDialog();
+          if (!confirmed) return;
+        }
+
+        if (isNative) {
+          if ((isAndroid || (!kIsWeb && Platform.isIOS)) && exam.antiCurang) {
+            final isAdmin = await KioskService.isAdminActive();
+            if (!isAdmin) {
+              if (!mounted) return;
+              await _showKioskRequiredDialog();
+              return;
+            }
+          }
+          Navigator.push(context, MaterialPageRoute(
+              builder: (_) => NativeExamScreen(
+                exam: exam, user: widget.user,
+                cam: hasMobileFeatures ? _cam : null,
+              )));
+        } else {
+          if ((isAndroid || (!kIsWeb && Platform.isIOS)) && exam.antiCurang) {
+            final isAdmin = await KioskService.isAdminActive();
+            if (!isAdmin) {
+              if (!mounted) return;
+              await _showKioskRequiredDialog();
+              return;
+            }
+          }
+          Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ExamScreen(
+                exam: exam, user: widget.user,
+                cam: hasMobileFeatures ? _cam : null,
+              )));
+        }
+      }
+    } else {
+      _snack("Token salah! Silakan coba lagi.", Colors.red);
+    }
+  }
+
+  // Show kiosk required dialog
+  Future<void> _showKioskRequiredDialog() async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.lock, color: Colors.orange),
+          SizedBox(width: 8),
+          Text("Mode Kiosk Diperlukan"),
+        ]),
+        content: const Text(
+          "Ujian ini menggunakan mode anti-curang.\n\n"
+          "Aplikasi membutuhkan izin Device Administrator untuk mengunci layar selama ujian berlangsung.\n\n"
+          "Tanpa izin ini, Anda tidak dapat memulai ujian.",
+          textAlign: TextAlign.center,
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Tutup"),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Card tampilan ketika siswa sudah selesai mengerjakan
   Widget _sudahSelesaiCard(ExamData exam) => Container(
     width: double.infinity,
@@ -11264,160 +12854,16 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
     ]),
   );
 
+  // Legacy _startExam - uses first available exam with main token controller
   void _startExam() async {
-    final tokenInput = _tokenCtrl.text.trim();
-    if (tokenInput.isEmpty) {
-      _snack("Masukkan token ujian terlebih dahulu!", Colors.orange);
+    if (_availableExams.isEmpty) {
+      _snack("Tidak ada ujian tersedia!", Colors.orange);
       return;
     }
-    try {
-      final ts = await FirebaseFirestore.instance
-          .collection('settings')
-          .doc('exam_token')
-          .get();
-      if (!ts.exists) {
-        _snack("Token belum dikonfigurasi. Hubungi admin.", Colors.red);
-        return;
-      }
-      final serverToken =
-          (ts.data() as Map)['current_token']?.toString() ?? "";
-      if (tokenInput == serverToken) {
-        if (mounted) {
-          // Cek apakah ujian mode native
-          final examDoc = await FirebaseFirestore.instance
-              .collection('exam').doc(_exam!.id).get();
-          final isNative = (examDoc.data() as Map?)?['mode'] == 'native';
-
-          // Untuk Web (Safari iPad) dengan antiCurang: wajib konfirmasi Guided Access
-          if (kIsWeb && _exam!.antiCurang) {
-            final confirmed = await _showWebGuidedAccessConfirmDialog();
-            if (!confirmed) return;
-          }
-
-          if (isNative) {
-            // Cek kiosk sebelum masuk ujian (Android: Device Admin, iOS: Guided Access)
-            if ((isAndroid || (!kIsWeb && Platform.isIOS)) && _exam!.antiCurang) {
-              final isAdmin = await KioskService.isAdminActive();
-              if (!isAdmin) {
-                if (!mounted) return;
-                if (!kIsWeb && Platform.isIOS) {
-                  await _showGuidedAccessRequiredDialog();
-                  return;
-                }
-                final mauAktifkan = await showDialog<bool>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => AlertDialog(
-                    icon: const Icon(Icons.security, color: Colors.orange, size: 40),
-                    title: const Text("Izin Diperlukan",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    content: const Text(
-                      "Ujian ini menggunakan mode anti-curang.\n\n"
-                          "Aplikasi membutuhkan izin Device Administrator untuk mengunci layar selama ujian berlangsung.\n\n"
-                          "Tanpa izin ini, Anda tidak dapat memulai ujian.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(height: 1.5),
-                    ),
-                    actionsAlignment: MainAxisAlignment.center,
-                    actions: [
-                      OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context, false),
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        label: const Text("Tidak Sekarang",
-                            style: TextStyle(color: Colors.red)),
-                      ),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0F172A),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: () => Navigator.pop(context, true),
-                        icon: const Icon(Icons.check),
-                        label: const Text("Aktifkan"),
-                      ),
-                    ],
-                  ),
-                );
-                if (mauAktifkan == true) {
-                  await KioskService.start(); // tampilkan popup Device Admin
-                }
-                // Batalkan masuk ujian — siswa harus aktifkan dulu lalu coba lagi
-                return;
-              }
-            }
-            Navigator.push(context, MaterialPageRoute(
-                builder: (_) => NativeExamScreen(
-                  exam: _exam!, user: widget.user,
-                  // Kamera tidak tersedia di Windows
-                  cam: hasMobileFeatures ? _cam : null,
-                )));
-          } else {
-            // Cek kiosk sebelum masuk ujian (Android: Device Admin, iOS: Guided Access)
-            if ((isAndroid || (!kIsWeb && Platform.isIOS)) && _exam!.antiCurang) {
-              final isAdmin = await KioskService.isAdminActive();
-              if (!isAdmin) {
-                if (!mounted) return;
-                if (!kIsWeb && Platform.isIOS) {
-                  await _showGuidedAccessRequiredDialog();
-                  return;
-                }
-                final mauAktifkan = await showDialog<bool>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => AlertDialog(
-                    icon: const Icon(Icons.security, color: Colors.orange, size: 40),
-                    title: const Text("Izin Diperlukan",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    content: const Text(
-                      "Ujian ini menggunakan mode anti-curang.\n\n"
-                          "Aplikasi membutuhkan izin Device Administrator untuk mengunci layar selama ujian berlangsung.\n\n"
-                          "Tanpa izin ini, Anda tidak dapat memulai ujian.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(height: 1.5),
-                    ),
-                    actionsAlignment: MainAxisAlignment.center,
-                    actions: [
-                      OutlinedButton.icon(
-                        onPressed: () => Navigator.pop(context, false),
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        label: const Text("Tidak Sekarang",
-                            style: TextStyle(color: Colors.red)),
-                      ),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0F172A),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: () => Navigator.pop(context, true),
-                        icon: const Icon(Icons.check),
-                        label: const Text("Aktifkan"),
-                      ),
-                    ],
-                  ),
-                );
-                if (mauAktifkan == true) {
-                  await KioskService.start();
-                }
-                return; // Batalkan — siswa harus aktifkan dulu lalu coba lagi
-              }
-            }
-            // Android via WebView, Windows/Web buka browser
-            Navigator.push(context, MaterialPageRoute(
-                builder: (_) => ExamScreen(
-                  exam: _exam!, user: widget.user,
-                  cam: hasMobileFeatures ? _cam : null,
-                )));
-          }
-        }
-      } else {
-        _snack("Token salah! Minta token dari proktor.", Colors.red);
-      }
-    } catch (e) {
-      _snack("Terjadi kesalahan. Coba lagi.", Colors.red);
-    }
+    _startExamFor(_availableExams.first, _tokenCtrl.text.trim());
   }
+
+  // Removed old _startExam implementation - now using _startExamFor above
 
   void _snack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -11873,19 +13319,29 @@ class _ExamScreenState extends State<ExamScreen>
               backgroundColor: Colors.orange,
               duration: const Duration(seconds: 3),
             ));
-            // Catat ke Firestore
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(widget.user.id)
-                .update({'curang': count});
+            // Catat jumlah pelanggaran & alasan untuk ujian ini (status ditandai melanggar sejak pelanggaran pertama)
+            updateExamStatusForUser(
+              exam: widget.exam,
+              user: widget.user,
+              status: 'melanggar',
+              violationCount: count,
+              extraFields: {
+                'exam_status.${widget.exam.id}.lastViolationReason': reason ?? 'web_violation',
+              },
+            );
           },
           onAutoSubmit: (reason) {
             if (_submitted) return;
-            // Update status melanggar lalu submit
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(widget.user.id)
-                .update({'status_mengerjakan': 'melanggar'});
+            // Update status melanggar lalu submit (khusus ujian ini)
+            updateExamStatusForUser(
+              exam: widget.exam,
+              user: widget.user,
+              status: 'melanggar',
+              violationCount: _curang,
+              extraFields: {
+                'exam_status.${widget.exam.id}.lastViolationReason': reason ?? 'web_max_violation',
+              },
+            );
             _doSubmit(reason: 'max_violation');
           },
         );
@@ -11896,10 +13352,11 @@ class _ExamScreenState extends State<ExamScreen>
         );
       }
     }
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.user.id)
-        .update({'status_mengerjakan': 'mengerjakan'});
+    await updateExamStatusForUser(
+      exam: widget.exam,
+      user: widget.user,
+      status: 'mengerjakan',
+    );
   }
 
   void _doSubmit({String reason = "manual"}) async {
@@ -11914,10 +13371,11 @@ class _ExamScreenState extends State<ExamScreen>
     } else if (kIsWeb) {
       try { await KioskService.stop(); } catch (_) {}
     }
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(widget.user.id)
-        .update({'status_mengerjakan': 'selesai'});
+    await updateExamStatusForUser(
+      exam: widget.exam,
+      user: widget.user,
+      status: 'selesai',
+    );
 
     if (mounted) {
       if (reason == "time_up") {
@@ -11953,15 +13411,17 @@ class _ExamScreenState extends State<ExamScreen>
       _curang++;
       if (_curang >= widget.exam.maxCurang) {
         // Kunci aplikasi
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.user.id)
-            .update({'status_mengerjakan': 'melanggar'});
+        await updateExamStatusForUser(
+          exam: widget.exam,
+          user: widget.user,
+          status: 'melanggar',
+          violationCount: _curang,
+        );
         if (mounted) {
-          Navigator.pushReplacement(
+              Navigator.pushReplacement(
               context,
               MaterialPageRoute(
-                  builder: (_) => LockScreen(user: widget.user)));
+                  builder: (_) => LockScreen(user: widget.user, exam: widget.exam)));
         }
       } else {
         if (mounted) {
@@ -12210,7 +13670,8 @@ class _CountdownBadgeState extends State<_CountdownBadge> {
 // ============================================================
 class LockScreen extends StatefulWidget {
   final UserAccount user;
-  const LockScreen({super.key, required this.user});
+  final ExamData? exam; // opsional: untuk catat statistik per ujian
+  const LockScreen({super.key, required this.user, this.exam});
   @override
   State<LockScreen> createState() => _LockScreenState();
 }
@@ -12321,10 +13782,22 @@ class _LockScreenState extends State<LockScreen> {
       if (d.exists &&
           _p.text.trim() ==
               (d.data() as Map)['proctor_password']?.toString()) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.user.id)
-            .update({'status_mengerjakan': 'mengerjakan'});
+        // Jika konteks ujian diketahui, catat juga ke exam_status (naikkan counter proktor unlock)
+        if (widget.exam != null) {
+          await updateExamStatusForUser(
+            exam: widget.exam!,
+            user: widget.user,
+            status: 'mengerjakan',
+            extraFields: {
+              'exam_status.${widget.exam!.id}.proktorUnlockCount': FieldValue.increment(1),
+            },
+          );
+        } else {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(widget.user.id)
+              .update({'status_mengerjakan': 'mengerjakan'});
+        }
         if (isAndroid) {
           try { SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); } catch (_) {}
         }
@@ -12759,12 +14232,20 @@ class NativeExamScreen extends StatefulWidget {
 
 class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBindingObserver {
   List<SoalModel> _soals = [];
+  List<SoalModel> _soalsOriginal = []; // before shuffle
   bool _loading = true;
   int _currentIndex = 0;
   final Map<String, String> _jawaban = {};
   bool _submitted = false;
   int _curang = 0;
   Timer? _autoSubmitTimer;
+  Timer? _autoSaveTimer;
+  DateTime? _serverStartTime;
+  final Map<String, List<int>> _shuffledOptionIndices = {}; // soalId -> shuffled indices
+
+  // Activity log per soal
+  final Map<String, int> _timePerSoal = {}; // soalId -> seconds spent
+  DateTime? _soalViewStart;
 
   // ── Kiosk overlay ──
   bool _showKioskLock = false;
@@ -12805,6 +14286,11 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
     WidgetsBinding.instance.addObserver(this);
     _initExam();
     _loadSoal();
+    // Auto-save jawaban setiap 30 detik
+    _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_submitted && _jawaban.isNotEmpty) _autoSaveDraft();
+    });
+    _soalViewStart = DateTime.now();
     // Paksa kunci layar setiap 1 detik (anti bypass Home button)
     if (isAndroid && widget.exam.antiCurang) {
       _kioskEnforceTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -12876,8 +14362,11 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
     } else if (isWindows) {
       await KioskService.start();
     }
-    await FirebaseFirestore.instance.collection('users').doc(widget.user.id)
-        .update({'status_mengerjakan': 'mengerjakan'});
+    await updateExamStatusForUser(
+      exam: widget.exam,
+      user: widget.user,
+      status: 'mengerjakan',
+    );
   }
 
   // Tap pada timer — 5x tap dalam 3 detik → muncul dialog proktor
@@ -12916,12 +14405,18 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
       final max = widget.exam.maxCurang;
       final terlampaui = _curang >= max;
 
-      // Update Firestore
-      FirebaseFirestore.instance.collection('users').doc(widget.user.id)
-          .update({
-        'status_mengerjakan': terlampaui ? 'melanggar' : 'mengerjakan',
-        'jumlahPelanggaran': _curang,
-      });
+      // Update Firestore: status khusus ujian ini + jumlah pelanggaran
+      // Status ditandai "melanggar" sejak pelanggaran pertama.
+      await updateExamStatusForUser(
+        exam: widget.exam,
+        user: widget.user,
+        status: 'melanggar',
+        violationCount: _curang,
+        extraFields: {
+          'jumlahPelanggaran': _curang,
+          'exam_status.${widget.exam.id}.lastViolationReason': 'lost_focus',
+        },
+      );
 
       if (mounted) {
         setState(() {
@@ -13060,9 +14555,15 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
           .collection('settings').doc('app_config').get();
       final correctPin = (d.data() as Map?)?['proctor_password']?.toString() ?? '';
       if (_kioskPinCtrl.text.trim() == correctPin) {
-        // PIN benar — buka overlay & reset status ke mengerjakan
-        await FirebaseFirestore.instance.collection('users').doc(widget.user.id)
-            .update({'status_mengerjakan': 'mengerjakan'});
+        // PIN benar — buka overlay & reset status ke mengerjakan, catat berapa kali proktor bantu
+        await updateExamStatusForUser(
+          exam: widget.exam,
+          user: widget.user,
+          status: 'mengerjakan',
+          extraFields: {
+            'exam_status.${widget.exam.id}.proktorUnlockCount': FieldValue.increment(1),
+          },
+        );
         _pinCooldownTimer?.cancel();
         if (mounted) {
           setState(() {
@@ -13125,6 +14626,15 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
           .collection('settings').doc('app_config').get();
       final correctPin = (d.data() as Map?)?['proctor_password']?.toString() ?? '';
       if (_proktorPinCtrl.text.trim() == correctPin) {
+        // Catat bahwa proktor telah menginput PIN untuk ujian ini
+        await updateExamStatusForUser(
+          exam: widget.exam,
+          user: widget.user,
+          status: 'mengerjakan',
+          extraFields: {
+            'exam_status.${widget.exam.id}.proktorUnlockCount': FieldValue.increment(1),
+          },
+        );
         setState(() { _showProktorDialog = false; _proktorPinLoading = false; });
         if (mounted) _showProktorActionDialog();
       } else {
@@ -13247,11 +14757,13 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
         await KioskService.stop();
       }
 
-      // Reset status siswa di Firestore
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.user.id)
-          .update({'status_mengerjakan': 'belum mulai'});
+      // Reset status siswa untuk ujian ini di Firestore
+      await updateExamStatusForUser(
+        exam: widget.exam,
+        user: widget.user,
+        status: 'belum mulai',
+        violationCount: 0,
+      );
 
       if (!mounted) return;
 
@@ -13267,16 +14779,96 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
     final snap = await FirebaseFirestore.instance
         .collection('exam').doc(widget.exam.id).collection('soal')
         .orderBy('nomor').get();
+    final soals = snap.docs.map((d) => SoalModel.fromMap(d.data(), d.id)).toList();
+    _soalsOriginal = List.from(soals);
+
+    // Randomisasi soal berdasarkan user ID (konsisten per siswa)
+    final seed = widget.user.id.hashCode;
+    final rng = Random(seed);
+    soals.shuffle(rng);
+
+    // Randomisasi opsi PG per soal
+    for (final s in soals) {
+      if (s.tipe == TipeSoal.pilihanGanda && s.pilihan.length > 1) {
+        final indices = List.generate(s.pilihan.length, (i) => i);
+        indices.shuffle(Random(seed ^ s.id.hashCode));
+        _shuffledOptionIndices[s.id] = indices;
+      }
+    }
+
+    // Resume: load draft jawaban jika ada
+    try {
+      final draftDoc = await FirebaseFirestore.instance
+          .collection('exam').doc(widget.exam.id)
+          .collection('draft_jawaban').doc(widget.user.id).get();
+      if (draftDoc.exists) {
+        final data = draftDoc.data() as Map<String, dynamic>? ?? {};
+        final saved = data['jawaban'] as Map<String, dynamic>? ?? {};
+        saved.forEach((k, v) => _jawaban[k] = v.toString());
+        _curang = (data['curangCount'] as int?) ?? 0;
+        final lastIndex = (data['lastSoalIndex'] as int?) ?? 0;
+        _currentIndex = lastIndex.clamp(0, soals.length - 1);
+      }
+    } catch (_) {}
+
+    // Record server start time
+    try {
+      final serverDoc = await FirebaseFirestore.instance
+          .collection('exam').doc(widget.exam.id)
+          .collection('exam_sessions').doc(widget.user.id).get();
+      if (serverDoc.exists) {
+        _serverStartTime = (serverDoc.data()?['startedAt'] as Timestamp?)?.toDate();
+      } else {
+        await FirebaseFirestore.instance
+            .collection('exam').doc(widget.exam.id)
+            .collection('exam_sessions').doc(widget.user.id)
+            .set({'startedAt': FieldValue.serverTimestamp(), 'userId': widget.user.id});
+      }
+    } catch (_) {}
+
     setState(() {
-      _soals = snap.docs.map((d) => SoalModel.fromMap(d.data(), d.id)).toList();
+      _soals = soals;
       _loading = false;
     });
+  }
+
+  // Auto-save draft jawaban ke Firestore
+  Future<void> _autoSaveDraft() async {
+    if (_submitted) return;
+    // Track time on current soal
+    _recordSoalTime();
+    _soalViewStart = DateTime.now();
+    try {
+      await FirebaseFirestore.instance
+          .collection('exam').doc(widget.exam.id)
+          .collection('draft_jawaban').doc(widget.user.id)
+          .set({
+        'jawaban': _jawaban,
+        'lastSoalIndex': _currentIndex,
+        'curangCount': _curang,
+        'timePerSoal': _timePerSoal,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'siswaId': widget.user.id,
+        'namaSiswa': widget.user.nama,
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  // Record time spent on current soal
+  void _recordSoalTime() {
+    if (_soalViewStart != null && _soals.isNotEmpty) {
+      final soalId = _soals[_currentIndex].id;
+      final elapsed = DateTime.now().difference(_soalViewStart!).inSeconds;
+      _timePerSoal[soalId] = (_timePerSoal[soalId] ?? 0) + elapsed;
+    }
   }
 
   void _doSubmit({String reason = "manual"}) async {
     if (_submitted) return;
     _submitted = true;
     _autoSubmitTimer?.cancel();
+    _autoSaveTimer?.cancel();
+    _recordSoalTime(); // final time record
     if (isAndroid) {
       await FlutterWindowManagerPlus.clearFlags(FlutterWindowManagerPlus.FLAG_SECURE);
       try {
@@ -13296,12 +14888,16 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
       final batch = FirebaseFirestore.instance.batch();
       final jwbRef = FirebaseFirestore.instance
           .collection('exam').doc(widget.exam.id).collection('jawaban');
+      int totalNilai = 0;
+      int totalBenar = 0;
       for (final soal in _soals) {
         final jawaban = _jawaban[soal.id] ?? '';
         final benar = soal.tipe != TipeSoal.uraian
             ? jawaban.toUpperCase() == soal.kunciJawaban.toUpperCase()
             : null;
         final nilaiDapat = (benar == true) ? soal.skor : 0;
+        totalNilai += nilaiDapat;
+        if (benar == true) totalBenar++;
         batch.set(jwbRef.doc('${widget.user.id}_${soal.id}'), {
           'siswaId': widget.user.id,
           'namaSiswa': widget.user.nama,
@@ -13309,14 +14905,40 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
           'jawaban': jawaban,
           'benar': benar,
           'nilaiDapat': nilaiDapat,
+          'timeSpent': _timePerSoal[soal.id] ?? 0,
           'submittedAt': FieldValue.serverTimestamp(),
         });
       }
+      // Save activity log / summary
+      final logRef = FirebaseFirestore.instance
+          .collection('exam').doc(widget.exam.id)
+          .collection('activity_log').doc(widget.user.id);
+      batch.set(logRef, {
+        'siswaId': widget.user.id,
+        'namaSiswa': widget.user.nama,
+        'kelas': widget.user.ruang,
+        'totalNilai': totalNilai,
+        'totalBenar': totalBenar,
+        'totalSoal': _soals.length,
+        'jumlahDijawab': _jawaban.values.where((v) => v.isNotEmpty).length,
+        'jumlahPelanggaran': _curang,
+        'timePerSoal': _timePerSoal,
+        'submitReason': reason,
+        'submittedAt': FieldValue.serverTimestamp(),
+      });
+      // Delete draft
+      final draftRef = FirebaseFirestore.instance
+          .collection('exam').doc(widget.exam.id)
+          .collection('draft_jawaban').doc(widget.user.id);
+      batch.delete(draftRef);
       await batch.commit();
     } catch (_) {}
 
-    await FirebaseFirestore.instance.collection('users').doc(widget.user.id)
-        .update({'status_mengerjakan': 'selesai'});
+    await updateExamStatusForUser(
+      exam: widget.exam,
+      user: widget.user,
+      status: 'selesai',
+    );
 
     if (mounted) {
       if (reason == "time_up") {
@@ -13344,6 +14966,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoSubmitTimer?.cancel();
+    _autoSaveTimer?.cancel();
     _timerTapReset?.cancel();
     _pinCooldownTimer?.cancel();
     _proktorCooldownTimer?.cancel();
@@ -13516,7 +15139,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
                             _jawaban[_soals[i].id]?.isNotEmpty ?? false;
                         final isActive = i == _currentIndex;
                         return GestureDetector(
-                          onTap: () => setState(() => _currentIndex = i),
+                          onTap: () { _recordSoalTime(); setState(() => _currentIndex = i); _soalViewStart = DateTime.now(); },
                           child: Container(
                             width: 30, height: 30,
                             margin: const EdgeInsets.only(right: 4),
@@ -13550,7 +15173,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
                     if (_currentIndex > 0)
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: () => setState(() => _currentIndex--),
+                          onPressed: () { _recordSoalTime(); setState(() => _currentIndex--); _soalViewStart = DateTime.now(); },
                           icon: const Icon(Icons.arrow_back, size: 16),
                           label: const Text("Sebelumnya"),
                         ),
@@ -13563,7 +15186,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
                           style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF0F172A),
                               foregroundColor: Colors.white),
-                          onPressed: () => setState(() => _currentIndex++),
+                          onPressed: () { _recordSoalTime(); setState(() => _currentIndex++); _soalViewStart = DateTime.now(); },
                           icon: const Icon(Icons.arrow_forward, size: 16),
                           label: const Text("Selanjutnya"),
                         ),
@@ -13956,40 +15579,47 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
     );
   }
 
-  // ── Builder: pilihan ganda ──
-  List<Widget> _buildPG(SoalModel soal) => soal.pilihan.map((p) {
-    final key = p.split('.').first.trim();
-    final isSelected = _jawaban[soal.id] == key;
-    return GestureDetector(
-      onTap: () => setState(() => _jawaban[soal.id] = key),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.blue.shade50 : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? Colors.blue : Colors.grey.shade200,
-            width: isSelected ? 2 : 1,
+  // ── Builder: pilihan ganda (dengan randomisasi opsi) ──
+  List<Widget> _buildPG(SoalModel soal) {
+    final indices = _shuffledOptionIndices[soal.id]
+        ?? List.generate(soal.pilihan.length, (i) => i);
+    final labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    return indices.map((origIdx) {
+      final p = soal.pilihan[origIdx];
+      final origKey = p.split('.').first.trim(); // original key like "A", "B"
+      final displayLabel = labels[indices.indexOf(origIdx)]; // new display label
+      final isSelected = _jawaban[soal.id] == origKey;
+      return GestureDetector(
+        onTap: () => setState(() => _jawaban[soal.id] = origKey),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.blue.shade50 : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? Colors.blue : Colors.grey.shade200,
+              width: isSelected ? 2 : 1,
+            ),
           ),
+          child: Row(children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor:
+              isSelected ? Colors.blue : Colors.grey.shade100,
+              child: Text(displayLabel,
+                  style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.grey.shade600,
+                      fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: _buildTextWithLatex(
+                p.substring(p.indexOf('.') + 1).trim(), 14)),
+          ]),
         ),
-        child: Row(children: [
-          CircleAvatar(
-            radius: 14,
-            backgroundColor:
-            isSelected ? Colors.blue : Colors.grey.shade100,
-            child: Text(key,
-                style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.grey.shade600,
-                    fontSize: 12, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: _buildTextWithLatex(
-              p.substring(p.indexOf('.') + 1).trim(), 14)),
-        ]),
-      ),
-    );
-  }).toList();
+      );
+    }).toList();
+  }
 
   // ── Builder: benar/salah ──
   List<Widget> _buildBS(SoalModel soal) => ['BENAR', 'SALAH'].map((opt) {
