@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'dart:math';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -127,21 +128,21 @@ extension BMColorsX on BuildContext {
 
 class BMThemePresets {
   static const _presets = {
-    BMTheme.navy:   BMColors(primary: Color(0xFF0F172A), gradient2: Color(0xFF1E3A5F), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
-    BMTheme.dark:   BMColors(primary: Color(0xFF1E293B), gradient2: Color(0xFF0F172A), surface: Color(0xFF0F172A), cardBg: Color(0xFF1E293B)),
-    BMTheme.ocean:  BMColors(primary: Color(0xFF0369A1), gradient2: Color(0xFF0284C7), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
-    BMTheme.forest: BMColors(primary: Color(0xFF166534), gradient2: Color(0xFF15803D), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
-    BMTheme.purple: BMColors(primary: Color(0xFF6B21A8), gradient2: Color(0xFF7E22CE), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
-    BMTheme.rose:   BMColors(primary: Color(0xFF9F1239), gradient2: Color(0xFFBE123C), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.navy:   BMColors(primary: Color(0xFF0D1117), gradient2: Color(0xFF1C2A4A), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.dark:   BMColors(primary: Color(0xFF000000), gradient2: Color(0xFF0F0F1A), surface: Color(0xFF0F172A), cardBg: Color(0xFF1E293B)),
+    BMTheme.ocean:  BMColors(primary: Color(0xFF0C1A3E), gradient2: Color(0xFF0E3460), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.forest: BMColors(primary: Color(0xFF0A1F12), gradient2: Color(0xFF0E3A1C), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.purple: BMColors(primary: Color(0xFF130A2A), gradient2: Color(0xFF2D1554), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
+    BMTheme.rose:   BMColors(primary: Color(0xFF1A0510), gradient2: Color(0xFF3D0A20), surface: Color(0xFFF1F5F9), cardBg: Colors.white),
   };
 
   static const _names = {
-    BMTheme.navy:   'Navy (Default)',
-    BMTheme.dark:   'Dark Mode',
-    BMTheme.ocean:  'Ocean Blue',
-    BMTheme.forest: 'Forest Green',
-    BMTheme.purple: 'Royal Purple',
-    BMTheme.rose:   'Deep Rose',
+    BMTheme.navy:   'Void Dark',
+    BMTheme.dark:   'Pure Black',
+    BMTheme.ocean:  'Deep Ocean',
+    BMTheme.forest: 'Dark Forest',
+    BMTheme.purple: 'Cosmic Purple',
+    BMTheme.rose:   'Blood Rose',
   };
 
   static String name(BMTheme t) => _names[t]!;
@@ -181,19 +182,44 @@ class BMThemePresets {
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
       cardTheme: CardThemeData(
-        elevation: 2,
-        shadowColor: Colors.black26,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.09)
+                : Colors.black.withValues(alpha: 0.07),
+            width: 1,
+          ),
+        ),
         surfaceTintColor: Colors.transparent,
+        margin: EdgeInsets.zero,
+      ),
+      listTileTheme: ListTileThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        selectedColor: c.primary,
+        selectedTileColor: c.primary.withValues(alpha: 0.08),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      ),
+      drawerTheme: DrawerThemeData(
+        backgroundColor: isDark ? const Color(0xFF111122) : Colors.white,
+        elevation: 0,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(28),
+            bottomRight: Radius.circular(28),
+          ),
+        ),
       ),
       dialogTheme: DialogThemeData(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         elevation: 8,
       ),
       snackBarTheme: const SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderRadius: BorderRadius.all(Radius.circular(14)),
         ),
       ),
     );
@@ -233,14 +259,16 @@ mixin IdleTimeoutMixin<T extends StatefulWidget> on State<T> {
           Text('Sesi Tidak Aktif'),
         ]),
         content: const Text('Sesi Anda tidak aktif selama 15 menit.\nApakah Anda ingin tetap masuk?'),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () {
               Navigator.pop(context);
               startIdleWatcher();
             },
             child: const Text('Tetap Masuk'),
           ),
+          const SizedBox(width: 8),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red, foregroundColor: Colors.white),
@@ -382,6 +410,12 @@ class ExamData {
   final DateTime waktuMulai, waktuSelesai;
   final bool antiCurang, kameraAktif, autoSubmit;
   final int maxCurang;
+  final String status;
+  final String mode;
+  final DateTime? createdAt;
+  final String kategori;
+  final String creatorName;
+  final List<String> targetKelas;
 
   ExamData({
     required this.id,
@@ -396,6 +430,12 @@ class ExamData {
     required this.kameraAktif,
     required this.autoSubmit,
     required this.maxCurang,
+    this.status = 'published',
+    this.mode = 'form',
+    this.createdAt,
+    this.kategori = '',
+    this.creatorName = '',
+    this.targetKelas = const [],
   });
 
   factory ExamData.fromFirestore(DocumentSnapshot doc) {
@@ -414,9 +454,16 @@ class ExamData {
       kameraAktif: data['kameraAktif'] ?? true,
       autoSubmit: data['autoSubmit'] ?? true,
       maxCurang: data['maxCurang'] ?? 3,
+      status: data['status'] ?? 'published',
+      mode: data['mode'] ?? 'form',
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      kategori: data['kategori'] ?? '',
+      creatorName: data['creatorName'] ?? '',
+      targetKelas: List<String>.from(data['targetKelas'] ?? []),
     );
   }
 
+  bool get isDraft => status == 'draft';
   bool get isOngoing =>
       DateTime.now().isAfter(waktuMulai) && DateTime.now().isBefore(waktuSelesai);
   bool get sudahSelesai => DateTime.now().isAfter(waktuSelesai);
@@ -1213,42 +1260,132 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: BMThemePresets.colors(_themeNotifier.value).primary,
-    body: FadeTransition(
-      opacity: _fade,
-      child: Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-            width: 180,
-            height: 180,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white24, width: 1.5),
+  Widget build(BuildContext context) {
+    final col = BMThemePresets.colors(_themeNotifier.value);
+    return Scaffold(
+      backgroundColor: col.primary,
+      body: Stack(
+        children: [
+          // Radial gradient bg
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.center,
+                  radius: 1.4,
+                  colors: [col.gradient2, col.primary, col.primary],
+                  stops: const [0.0, 0.55, 1.0],
+                ),
+              ),
             ),
-            padding: const EdgeInsets.all(10),
-            child: Image.asset('assets/logo.png', width: 160, height: 160),
           ),
-          const SizedBox(height: 20),
-          Text("Budi Mulia Exam",
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2)),
-          const SizedBox(height: 6),
-          Text("SMP Budi Mulia Jakarta",
-              style: TextStyle(color: Colors.white54, fontSize: 14)),
-          const SizedBox(height: 44),
-          const SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(color: Colors.white38, strokeWidth: 2),
+          // Orb glow top-right
+          Positioned(
+            top: -120, right: -100,
+            child: Container(
+              width: 420, height: 420,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [col.gradient2.withValues(alpha: 0.28), Colors.transparent],
+                ),
+              ),
+            ),
           ),
-        ]),
+          // Orb glow bottom-left
+          Positioned(
+            bottom: -100, left: -80,
+            child: Container(
+              width: 360, height: 360,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [col.gradient2.withValues(alpha: 0.18), Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+          // Main content
+          FadeTransition(
+            opacity: _fade,
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Glowing logo
+                  Container(
+                    width: 130, height: 130,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          col.gradient2.withValues(alpha: 0.55),
+                          col.primary.withValues(alpha: 0.1),
+                        ],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: col.gradient2.withValues(alpha: 0.55),
+                          blurRadius: 60, spreadRadius: 6,
+                        ),
+                      ],
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12), width: 1.5,
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(16),
+                    child: Image.asset('assets/logo.png'),
+                  ),
+                  const SizedBox(height: 30),
+                  // Gradient title
+                  ShaderMask(
+                    shaderCallback: (b) => const LinearGradient(
+                      colors: [Colors.white, Color(0xFFB0C4DE)],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ).createShader(b),
+                    child: const Text(
+                      'BUDI MULIA EXAM',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'SMP BUDI MULIA JAKARTA',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.35),
+                      fontSize: 11,
+                      letterSpacing: 3,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 64),
+                  // Slim shimmer bar
+                  Container(
+                    width: 100, height: 2,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    child: LinearProgressIndicator(
+                      backgroundColor: Colors.transparent,
+                      color: Colors.white.withValues(alpha: 0.5),
+                      minHeight: 2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 // ============================================================
@@ -1275,136 +1412,296 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: BMThemePresets.colors(_themeNotifier.value).primary,
-    body: Center(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset('assets/logo.png', width: 130, height: 130),
-            const SizedBox(height: 10),
-            const Text("Budi Mulia Exam",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold)),
-            const Text("SMP Budi Mulia Jakarta",
-                style: TextStyle(color: Colors.white54, fontSize: 13)),
-            const SizedBox(height: 40),
-
-            // Card Login
-            Container(
-              constraints: const BoxConstraints(maxWidth: 480),
-              width: double.infinity,
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              padding: const EdgeInsets.all(28),
+  Widget build(BuildContext context) {
+    final col = BMThemePresets.colors(_themeNotifier.value);
+    return Scaffold(
+      backgroundColor: col.primary,
+      body: Stack(
+        children: [
+          // ── Gradient background ──────────────────────────────────
+          Positioned.fill(
+            child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 30,
-                      spreadRadius: 0,
-                      offset: const Offset(0, 8)),
-                  BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                      spreadRadius: 0,
-                      offset: const Offset(0, 2)),
-                ],
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [col.primary, col.gradient2, col.primary],
+                  stops: const [0.0, 0.5, 1.0],
+                ),
               ),
-              child: Column(children: [
-                const Text("Masuk ke Akun",
-                    style: TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                const Text("Silakan masukkan kredensial Anda",
-                    style: TextStyle(color: Colors.grey, fontSize: 12)),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _u,
-                  decoration: InputDecoration(
-                    labelText: "Username",
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    prefixIcon: const Icon(Icons.person_outline),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                  ),
+            ),
+          ),
+          // ── Orb top-right ────────────────────────────────────────
+          Positioned(
+            top: -100, right: -80,
+            child: Container(
+              width: 360, height: 360,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [col.gradient2.withValues(alpha: 0.45), Colors.transparent],
                 ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _p,
-                  obscureText: _obscure,
-                  decoration: InputDecoration(
-                    labelText: "Password",
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscure
-                          ? Icons.visibility_off
-                          : Icons.visibility),
-                      onPressed: () =>
-                          setState(() => _obscure = !_obscure),
-                    ),
-                  ),
+              ),
+            ),
+          ),
+          // ── Orb bottom-left ──────────────────────────────────────
+          Positioned(
+            bottom: -110, left: -90,
+            child: Container(
+              width: 400, height: 400,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [col.gradient2.withValues(alpha: 0.25), Colors.transparent],
                 ),
-                const SizedBox(height: 12),
-                // Remember Me row
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Checkbox(
-                        value: _rememberMe,
-                        onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                        activeColor: const Color(0xFF0F172A),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+              ),
+            ),
+          ),
+          // ── Content ──────────────────────────────────────────────
+          Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 48),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Logo with glow
+                  Container(
+                    width: 88, height: 88,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          col.gradient2.withValues(alpha: 0.6),
+                          col.primary.withValues(alpha: 0.2),
+                        ],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: col.gradient2.withValues(alpha: 0.6),
+                          blurRadius: 40, spreadRadius: 4,
+                        ),
+                      ],
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15), width: 1,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    const Text("Ingat Saya",
-                        style: TextStyle(fontSize: 13, color: Colors.black87)),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: BMThemePresets.colors(_themeNotifier.value).primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: _loading ? null : _login,
-                    child: _loading
-                        ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                        : const Text("MASUK",
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1)),
+                    padding: const EdgeInsets.all(12),
+                    child: Image.asset('assets/logo.png'),
                   ),
-                ),
-              ]),
+                  const SizedBox(height: 18),
+                  ShaderMask(
+                    shaderCallback: (b) => const LinearGradient(
+                      colors: [Colors.white, Color(0xFFCDD9F0)],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ).createShader(b),
+                    child: const Text(
+                      'BUDI MULIA EXAM',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'SMP Budi Mulia Jakarta',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.38),
+                      fontSize: 12,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 36),
+                  // ── Glass card ──────────────────────────────────
+                  Container(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    margin: const EdgeInsets.symmetric(horizontal: 20),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(28),
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.09),
+                            borderRadius: BorderRadius.circular(28),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              width: 1.5,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(28),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Selamat Datang',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Masuk untuk melanjutkan',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.45),
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 28),
+                              // Username
+                              TextField(
+                                controller: _u,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  labelText: 'Username',
+                                  labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.55)),
+                                  prefixIcon: Icon(Icons.person_outline,
+                                      color: Colors.white.withValues(alpha: 0.45)),
+                                  filled: true,
+                                  fillColor: Colors.white.withValues(alpha: 0.07),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: const BorderSide(color: Colors.white54, width: 1.5),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              // Password
+                              TextField(
+                                controller: _p,
+                                obscureText: _obscure,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  labelText: 'Password',
+                                  labelStyle: TextStyle(color: Colors.white.withValues(alpha: 0.55)),
+                                  prefixIcon: Icon(Icons.lock_outline,
+                                      color: Colors.white.withValues(alpha: 0.45)),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscure ? Icons.visibility_off : Icons.visibility,
+                                      color: Colors.white38,
+                                    ),
+                                    onPressed: () => setState(() => _obscure = !_obscure),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white.withValues(alpha: 0.07),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: const BorderSide(color: Colors.white54, width: 1.5),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              // Remember Me
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 22, height: 22,
+                                    child: Checkbox(
+                                      value: _rememberMe,
+                                      onChanged: (v) => setState(() => _rememberMe = v ?? false),
+                                      activeColor: Colors.white,
+                                      checkColor: col.primary,
+                                      side: const BorderSide(color: Colors.white38),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(4)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Ingat Saya',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.65),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                              // Gradient login button
+                              SizedBox(
+                                width: double.infinity,
+                                height: 52,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(14),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        col.gradient2.withValues(alpha: 0.9),
+                                        col.gradient2,
+                                      ],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: col.gradient2.withValues(alpha: 0.5),
+                                        blurRadius: 20, offset: const Offset(0, 6),
+                                      ),
+                                    ],
+                                  ),
+                                  child: ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.transparent,
+                                      shadowColor: Colors.transparent,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                    onPressed: _loading ? null : _login,
+                                    child: _loading
+                                        ? const SizedBox(
+                                            width: 22, height: 22,
+                                            child: CircularProgressIndicator(
+                                                color: Colors.white, strokeWidth: 2),
+                                          )
+                                        : const Text(
+                                            'MASUK',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.bold,
+                                              letterSpacing: 2,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 
   void _login() async {
     if (_u.text.trim().isEmpty || _p.text.trim().isEmpty) {
@@ -1497,11 +1794,19 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
   Set<String> _mapelRoles = {};
   bool _isAdmin = false;
   bool _loadingRoles = true;
+  Set<int> _guruQuickActions = {1, 2, 3, 4, 5};
+  // 3-col wide layout state
+  int _sidebarIdx = 0;   // 0=Dashboard,1=Ujian,2=Rekap,3=Analitik,4=Jadwal
+  String _subPage = '';  // 'penilaian','tambah','banksoal'
+  String? _panelKelas;   // null=all, 'Kelas 7','Kelas 8','Kelas 9'
+  int _flyoutIdx = -1;   // -1=none, 1=Ujian flyout
+  int _ujianTab = 0;     // 0=saat ini,1=terjadwal,2=selesai,3=draft
 
   @override
   void initState() {
     super.initState();
     _loadRoles();
+    _loadGuruQuickActions();
     startIdleWatcher();
   }
 
@@ -1532,7 +1837,9 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => _buildNarrowLayout(context);
+
+  Widget _buildNarrowLayout(BuildContext context) => Scaffold(
     key: _scaffoldKey,
     backgroundColor: context.bm.surface,
     drawer: _buildGuruDrawer(),
@@ -1541,95 +1848,117 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
       child: Column(children: [
       // PIN & Token bar (jika admin aktifkan)
       _buildGuruPinTokenBar(),
-      // Header
+      // ── Header Besar ─────────────────────────────────────
       Container(
-        padding: const EdgeInsets.fromLTRB(4, 12, 20, 16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [context.bm.primary, context.bm.gradient2],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ),
+          borderRadius: const BorderRadius.only(
+            bottomLeft: Radius.circular(28),
+            bottomRight: Radius.circular(28),
+          ),
+          boxShadow: [BoxShadow(
+            color: context.bm.primary.withValues(alpha: 0.25),
+            blurRadius: 14, offset: const Offset(0, 6),
+          )],
         ),
-        child: Row(children: [
-          IconButton(
-            icon: const Icon(Icons.menu, color: Color(0xFF60A5FA)),
-            tooltip: "Menu",
-            onPressed: () => _scaffoldKey.currentState!.openDrawer(),
-          ),
-          // Avatar
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: Colors.white24,
-            child: Text(widget.guru.initials,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_isAdmin ? "Portal Admin & Guru" : "Portal Guru",
-                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              Text(widget.guru.nama,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              // Mapel badges
-              if (_loadingRoles)
-                const SizedBox(width: 60, height: 14,
-                    child: LinearProgressIndicator(backgroundColor: Colors.white24))
-              else
-                Wrap(spacing: 5, children: [
-                  if (_isAdmin)
-                    _headerBadge('Admin', Colors.purple, Icons.admin_panel_settings)
-                  else if (_mapelRoles.isEmpty)
-                    _headerBadge('Belum ada mapel — hubungi Admin', Colors.orange, Icons.warning)
-                  else
-                    ..._mapelRoles.map((m) => _headerBadge(m, Colors.teal, Icons.book)),
-                ]),
+        child: Column(children: [
+          // Baris atas: menu + nama sekolah + badge ujian + logout
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+            child: Row(children: [
+              IconButton(
+                icon: const Icon(Icons.menu, color: Colors.white70),
+                onPressed: () => _scaffoldKey.currentState!.openDrawer(),
+              ),
+              const Icon(Icons.school_outlined, color: Colors.white38, size: 14),
+              const SizedBox(width: 4),
+              const Expanded(
+                child: Text("SMP Budi Mulia",
+                    style: TextStyle(color: Colors.white38, fontSize: 12)),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  DateFormat('EEE, dd MMM').format(DateTime.now()),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('exam').snapshots(),
+                builder: (c, snap) {
+                  if (!snap.hasData) return const SizedBox();
+                  final all = snap.data!.docs.map((d) => ExamData.fromFirestore(d)).toList();
+                  final aktif = (_isAdmin ? all : all.where((e) => _mapelRoles.contains(e.mapel)))
+                      .where((e) => e.isOngoing).length;
+                  if (aktif == 0) return const SizedBox();
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(20)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.fiber_manual_record, color: Colors.white, size: 7),
+                      const SizedBox(width: 3),
+                      Text("$aktif Aktif", style: const TextStyle(color: Colors.white, fontSize: 10)),
+                    ]),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
+                tooltip: "Keluar",
+                onPressed: () => _confirmLogout(context),
+              ),
             ]),
           ),
-          // Badge ujian aktif
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('exam').snapshots(),
-            builder: (c, snap) {
-              if (!snap.hasData) return const SizedBox();
-              final all = snap.data!.docs.map((d) => ExamData.fromFirestore(d)).toList();
-              final aktif = (_isAdmin ? all : all.where(
-                      (e) => _mapelRoles.contains(e.mapel)))
-                  .where((e) => e.isOngoing).length;
-              if (aktif == 0) return const SizedBox();
-              return Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
-                  const SizedBox(width: 4),
-                  Text("\$aktif Aktif", style: const TextStyle(color: Colors.white, fontSize: 11)),
+          // Baris utama: greeting + nama besar + avatar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 22),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Icon(_greetIcon(), color: Colors.amber, size: 18),
+                  const SizedBox(width: 6),
+                  Text(_greetText(),
+                      style: const TextStyle(color: Colors.white70, fontSize: 15)),
                 ]),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            tooltip: "Keluar",
-            onPressed: () => _confirmLogout(context),
+                const SizedBox(height: 4),
+                Text(widget.guru.nama,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 24,
+                        fontWeight: FontWeight.bold, height: 1.2),
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 8),
+                if (_loadingRoles)
+                  const SizedBox(width: 80, height: 14,
+                      child: LinearProgressIndicator(backgroundColor: Colors.white24))
+                else
+                  Wrap(spacing: 5, runSpacing: 4, children: [
+                    if (_isAdmin)
+                      _headerBadge('Admin', Colors.purple, Icons.admin_panel_settings)
+                    else if (_mapelRoles.isEmpty)
+                      _headerBadge('Belum ada mapel', Colors.orange, Icons.warning)
+                    else
+                      ..._mapelRoles.map((m) => _headerBadge(m, Colors.teal, Icons.book)),
+                  ]),
+              ])),
+              const SizedBox(width: 14),
+              CircleAvatar(
+                radius: 34,
+                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                child: Text(widget.guru.initials,
+                    style: const TextStyle(color: Colors.white,
+                        fontWeight: FontWeight.bold, fontSize: 22)),
+              ),
+            ]),
           ),
         ]),
-      ),
-
-      // Tab bar
-      Container(
-        color: Colors.white,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(children: [
-            _tabBtn(0, Icons.add_circle_outline, "Buat Ujian"),
-            _tabBtn(1, Icons.history_edu, "History"),
-            _tabBtn(2, Icons.grading, "Rekap Nilai"),
-            _tabBtn(3, Icons.bar_chart_outlined, "Analitik"),
-            _tabBtn(4, Icons.calendar_month_outlined, "Jadwal"),
-          ]),
-        ),
       ),
 
       // Notifikasi mengawas hari ini
@@ -1649,7 +1978,7 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
           child: _buildTab(),
         )),
       ]),
-    ),
+      ),
   );
 
   // Cek apakah string hari mengandung tanggal hari ini
@@ -1780,13 +2109,14 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
   Widget _headerBadge(String label, Color color, IconData icon) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
     decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.2),
+      color: Colors.white.withValues(alpha: 0.18),
       borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white24, width: 0.5),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 10, color: Colors.white70),
+      Icon(icon, size: 10, color: Colors.white),
       const SizedBox(width: 3),
-      Text(label, style: const TextStyle(color: Colors.white70, fontSize: 9, fontWeight: FontWeight.bold)),
+      Text(label, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
     ]),
   );
 
@@ -1838,12 +2168,1123 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
 
   Widget _buildTab() {
     switch (_guruTab) {
-      case 1: return ExamHistoryList(filterMapel: _isAdmin ? null : _mapelRoles);
-      case 2: return RekapsNilaiScreen(filterMapel: _isAdmin ? null : _mapelRoles);
-      case 3: return AnalyticsScreen(filterMapel: _isAdmin ? null : _mapelRoles);
-      case 4: return JadwalScreen(role: _isAdmin ? 'admin1' : 'guru');
-      default: return ExamCreatorForm(allowedMapel: _isAdmin ? null : _mapelRoles);
+      case 1:  return ExamCreatorForm(allowedMapel: _isAdmin ? null : _mapelRoles);
+      case 2:  return ExamHistoryList(filterMapel: _isAdmin ? null : _mapelRoles);
+      case 3:  return RekapsNilaiScreen(filterMapel: _isAdmin ? null : _mapelRoles);
+      case 4:  return AnalyticsScreen(filterMapel: _isAdmin ? null : _mapelRoles);
+      case 5:  return JadwalScreen(role: _isAdmin ? 'admin1' : 'guru');
+      case 10: return LayoutBuilder(builder: (ctx, cst) {
+        if (cst.maxWidth >= 600) {
+          return Row(children: [_buildKelasPanel(), Expanded(child: _buildPenilaianView())]);
+        }
+        // Mobile: chip bar on top
+        final kelasAll = [null,'7A','7B','7C','7D','8A','8B','8C','8D','9A','9B','9C','9D'];
+        return Column(children: [
+          Container(
+            height: 44, color: context.bm.surface,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              children: kelasAll.map((c) {
+                final isActive = _panelKelas == c;
+                return GestureDetector(
+                  onTap: () => setState(() => _panelKelas = c),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isActive ? context.bm.primary : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(c ?? 'Semua', style: TextStyle(
+                      color: isActive ? Colors.white : Colors.grey.shade700,
+                      fontSize: 12, fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                    )),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          Expanded(child: _buildPenilaianView()),
+        ]);
+      });
+      default: return _berandaGuru();
     }
+  }
+
+  // ── Greeting helpers ──────────────────────────────────────────
+  String _greetText() {
+    final h = DateTime.now().hour;
+    if (h < 11) return "Selamat Pagi";
+    if (h < 15) return "Selamat Siang";
+    if (h < 18) return "Selamat Sore";
+    return "Selamat Malam";
+  }
+
+  IconData _greetIcon() {
+    final h = DateTime.now().hour;
+    if (h < 11) return Icons.wb_sunny;
+    if (h < 15) return Icons.wb_sunny_outlined;
+    if (h < 18) return Icons.wb_twilight;
+    return Icons.nightlight_round;
+  }
+
+  // ── Quick Actions SharedPreferences ───────────────────────────
+  Future<void> _loadGuruQuickActions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('guru_quick_actions');
+    if (saved != null && mounted) {
+      setState(() => _guruQuickActions = saved.map(int.parse).toSet());
+    }
+  }
+
+  Future<void> _saveGuruQuickActions() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('guru_quick_actions',
+        _guruQuickActions.map((e) => e.toString()).toList());
+  }
+
+  List<Map<String, dynamic>> get _quickActionItems => [
+    {'label': 'Buat Ujian',  'icon': Icons.add_circle_outline,    'tab': 1, 'color': const Color(0xFF1E88E5)},
+    {'label': 'History',     'icon': Icons.history_edu,            'tab': 2, 'color': const Color(0xFF7B1FA2)},
+    {'label': 'Rekap Nilai', 'icon': Icons.grading,                'tab': 3, 'color': const Color(0xFF00897B)},
+    {'label': 'Analitik',    'icon': Icons.bar_chart_outlined,     'tab': 4, 'color': const Color(0xFFF4511E)},
+    {'label': 'Jadwal',      'icon': Icons.calendar_month_outlined,'tab': 5, 'color': const Color(0xFF039BE5)},
+    {'label': 'Profil',      'icon': Icons.person_outline,         'tab': -1,'color': const Color(0xFF546E7A)},
+  ];
+
+  Future<void> _showGuruQuickActionsDialog() async {
+    final tmp = Set<int>.from(_guruQuickActions);
+    await showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text("Pilih Akses Cepat"),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            ..._quickActionItems.map((qa) {
+              final tab = qa['tab'] as int;
+              return CheckboxListTile(
+                value: tmp.contains(tab),
+                onChanged: (v) => setLocal(() => v! ? tmp.add(tab) : tmp.remove(tab)),
+                title: Row(children: [
+                  Icon(qa['icon'] as IconData, color: qa['color'] as Color, size: 18),
+                  const SizedBox(width: 8),
+                  Text(qa['label'] as String),
+                ]),
+                dense: true,
+                controlAffinity: ListTileControlAffinity.trailing,
+              );
+            }),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Batal")),
+            ElevatedButton(
+              onPressed: () {
+                setState(() => _guruQuickActions = tmp);
+                _saveGuruQuickActions();
+                Navigator.pop(ctx);
+              },
+              child: const Text("Simpan"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionsGrid() {
+    final items = _quickActionItems
+        .where((qa) => _guruQuickActions.contains(qa['tab'] as int))
+        .toList();
+    if (items.isEmpty) return const SizedBox();
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: items.map((qa) {
+        final color = qa['color'] as Color;
+        return GestureDetector(
+          onTap: () {
+            final tab = qa['tab'] as int;
+            if (tab == -1) {
+              Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.guru, canEdit: false)));
+            } else {
+              setState(() => _guruTab = tab);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.25)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(qa['icon'] as IconData, color: color, size: 16),
+              const SizedBox(width: 6),
+              Text(qa['label'] as String,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: color)),
+            ]),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ── Kelas Selesai Notification ─────────────────────────────────
+  Widget _buildKelasSelesaiNotif(List<UserAccount> allUsers) {
+    final siswa = allUsers.where((u) => u.role == 'siswa').toList();
+    if (siswa.isEmpty) return const SizedBox();
+    final Map<String, List<UserAccount>> byKelas = {};
+    for (final s in siswa) {
+      final k = s.classFolder;
+      if (k.isEmpty) continue;
+      byKelas.putIfAbsent(k, () => []).add(s);
+    }
+    final List<Widget> cards = [];
+    final sortedKelas = byKelas.keys.toList()..sort();
+    for (final kelas in sortedKelas) {
+      final students = byKelas[kelas]!;
+      if (students.isEmpty) continue;
+      final selesai = students.where((s) => s.statusMengerjakan == 'selesai').length;
+      final mengerjakan = students.where((s) => s.statusMengerjakan == 'mengerjakan').length;
+      if (selesai == students.length && selesai > 0) {
+        cards.add(_kelasSelesaiCard(kelas, selesai, students.length));
+      } else if (mengerjakan > 0 || selesai > 0) {
+        cards.add(_kelasProgressCard(kelas, selesai, students.length));
+      }
+    }
+    if (cards.isEmpty) return const SizedBox();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text("Status Per Kelas",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+      const SizedBox(height: 8),
+      ...cards,
+      const SizedBox(height: 4),
+    ]);
+  }
+
+  Widget _kelasSelesaiCard(String kelas, int count, int total) => Container(
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: Colors.green.shade50,
+      border: Border.all(color: Colors.green.shade300),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(children: [
+      const Icon(Icons.check_circle, color: Colors.green, size: 22),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text("Kelas $kelas — Semua Selesai!",
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
+        Text("$count/$total siswa telah submit",
+            style: TextStyle(fontSize: 11, color: Colors.green.shade700)),
+      ])),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(20)),
+        child: const Text("100%",
+            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      ),
+    ]),
+  );
+
+  Widget _kelasProgressCard(String kelas, int selesai, int total) => Container(
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: Colors.blue.shade50,
+      border: Border.all(color: Colors.blue.shade200),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(children: [
+      Row(children: [
+        const Icon(Icons.pending_outlined, color: Colors.blue, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text("Kelas $kelas",
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+        Text("$selesai/$total",
+            style: const TextStyle(color: Colors.grey, fontSize: 12)),
+      ]),
+      const SizedBox(height: 6),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: LinearProgressIndicator(
+          value: selesai / total,
+          minHeight: 6,
+          backgroundColor: Colors.blue.shade100,
+          valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+        ),
+      ),
+    ]),
+  );
+
+  // ── Activity Feed ─────────────────────────────────────────────
+  Widget _buildActivityFeed(List<UserAccount> siswa) {
+    final selesai = siswa.where((s) => s.statusMengerjakan == 'selesai').toList();
+    final melanggar = siswa.where((s) => s.statusMengerjakan == 'melanggar').toList();
+    if (selesai.isEmpty && melanggar.isEmpty) return const SizedBox();
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.receipt_long_outlined, size: 18),
+          const SizedBox(width: 8),
+          const Expanded(child: Text("Aktivitas Siswa",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+          if (selesai.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                  color: Colors.green.shade50, borderRadius: BorderRadius.circular(20)),
+              child: Text("${selesai.length} submit",
+                  style: TextStyle(color: Colors.green.shade700, fontSize: 11)),
+            ),
+        ]),
+        const SizedBox(height: 10),
+        if (melanggar.isNotEmpty) ...[
+          ...melanggar.take(3).map((s) => _activityRow(s, Colors.red, Icons.warning_amber, "Melanggar")),
+        ],
+        if (selesai.isNotEmpty) ...[
+          ...selesai.take(5).map((s) => _activityRow(s, Colors.green, Icons.check_circle_outline, "Submit")),
+        ],
+        if (selesai.length + melanggar.length > 8)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text("+${selesai.length + melanggar.length - 8} lainnya",
+                style: const TextStyle(color: Colors.grey, fontSize: 11)),
+          ),
+      ]),
+    );
+  }
+
+  Widget _activityRow(UserAccount s, Color c, IconData icon, String label) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          CircleAvatar(
+              radius: 16,
+              backgroundColor: c.withValues(alpha: 0.1),
+              child: Text(s.initials,
+                  style: TextStyle(color: c, fontSize: 10, fontWeight: FontWeight.bold))),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(s.nama,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis),
+            Text("Kelas ${s.classFolder}",
+                style: const TextStyle(color: Colors.grey, fontSize: 10)),
+          ])),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+                color: c.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, size: 10, color: c),
+              const SizedBox(width: 3),
+              Text(label, style: TextStyle(color: c, fontSize: 10)),
+            ]),
+          ),
+        ]),
+      );
+
+  // ── Mini stat card untuk Beranda ─────────────────────────────
+  Widget _miniStatCard(String label, String value, IconData icon, Color color) =>
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [BoxShadow(
+                color: color.withValues(alpha: 0.1),
+                blurRadius: 6, offset: const Offset(0, 2))],
+          ),
+          child: Column(children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 5),
+            Text(value,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                textAlign: TextAlign.center),
+          ]),
+        ),
+      );
+
+  // ── Halaman Beranda Guru ──────────────────────────────────────
+  Widget _berandaGuru() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').snapshots(),
+      builder: (ctx, uSnap) {
+        final allUsers = uSnap.hasData
+            ? uSnap.data!.docs.map((d) => UserAccount.fromFirestore(d)).toList()
+            : <UserAccount>[];
+        final siswa = allUsers.where((u) => u.role == 'siswa').toList();
+        final mengerjakan = siswa.where((s) => s.statusMengerjakan == 'mengerjakan').length;
+        final selesaiCount = siswa.where((s) => s.statusMengerjakan == 'selesai').length;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // ─ Akses Cepat ─────────────────────────────────────
+            Row(children: [
+              const Expanded(child: Text("Akses Cepat",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+              GestureDetector(
+                onTap: _showGuruQuickActionsDialog,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(20)),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.tune_outlined, size: 13, color: Colors.grey),
+                    SizedBox(width: 4),
+                    Text("Pilih", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ]),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            _buildQuickActionsGrid(),
+            const SizedBox(height: 20),
+
+            // ─ Mini Stats ──────────────────────────────────────
+            Row(children: [
+              _miniStatCard("Total Siswa", siswa.length.toString(), Icons.groups, Colors.blue),
+              const SizedBox(width: 8),
+              _miniStatCard("Sedang Ujian", mengerjakan.toString(), Icons.edit_note, Colors.indigo),
+              const SizedBox(width: 8),
+              _miniStatCard("Selesai", selesaiCount.toString(), Icons.check_circle_outline, Colors.green),
+            ]),
+            const SizedBox(height: 20),
+
+            // ─ Status Per Kelas ────────────────────────────────
+            _buildKelasSelesaiNotif(allUsers),
+            const SizedBox(height: 4),
+
+            // ─ Ujian Berlangsung ───────────────────────────────
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('exam').snapshots(),
+              builder: (c, examSnap) {
+                if (!examSnap.hasData) return const SizedBox();
+                final aktif = examSnap.data!.docs
+                    .map((d) => ExamData.fromFirestore(d))
+                    .where((e) =>
+                        (_isAdmin ? true : _mapelRoles.contains(e.mapel)) && e.isOngoing)
+                    .toList();
+                if (aktif.isEmpty) return const SizedBox();
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text("Ujian Berlangsung",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 8),
+                  ...aktif.map((e) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFF1565C0), Color(0xFF0D47A1)]),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.live_tv, color: Colors.white70, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(e.judul,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        Text("${e.mapel}  •  ${e.jenjang}  •  Selesai ${DateFormat('HH:mm').format(e.waktuSelesai)}",
+                            style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                      ])),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(20)),
+                        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.fiber_manual_record, color: Colors.white, size: 7),
+                          SizedBox(width: 3),
+                          Text("LIVE",
+                              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                        ]),
+                      ),
+                    ]),
+                  )),
+                  const SizedBox(height: 12),
+                ]);
+              },
+            ),
+
+            // ─ Aktivitas ──────────────────────────────────────
+            if (siswa.isNotEmpty) _buildActivityFeed(siswa),
+          ]),
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // WIDE LAYOUT (≥1024px): 3-column icon sidebar + panel + content
+  // ═══════════════════════════════════════════════════════════════
+
+  Widget _buildWideLayout(BuildContext context) {
+    return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: context.bm.surface,
+      body: SafeArea(
+        child: GestureDetector(
+          onTap: () {
+            resetIdleTimer();
+            if (_flyoutIdx >= 0) setState(() => _flyoutIdx = -1);
+          },
+          behavior: HitTestBehavior.translucent,
+          child: Stack(children: [
+            Row(children: [
+              _buildGuruIconSidebar(),
+              if (_sidebarIdx == 1 && _subPage == 'penilaian')
+                _buildKelasPanel(),
+              Expanded(
+                child: _loadingRoles
+                    ? const Center(child: CircularProgressIndicator())
+                    : _buildGuruWideContent(),
+              ),
+            ]),
+            if (_flyoutIdx >= 0) ...[
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _flyoutIdx = -1),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+              _buildGuruFlyout(),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuruIconSidebar() {
+    final items = [
+      {'idx': 0, 'icon': Icons.dashboard_outlined, 'label': 'Dashboard', 'flyout': false},
+      {'idx': 1, 'icon': Icons.quiz_outlined, 'label': 'Ujian', 'flyout': true},
+      {'idx': 2, 'icon': Icons.grading_outlined, 'label': 'Rekap', 'flyout': false},
+      {'idx': 3, 'icon': Icons.bar_chart_outlined, 'label': 'Analitik', 'flyout': false},
+      {'idx': 4, 'icon': Icons.calendar_month_outlined, 'label': 'Jadwal', 'flyout': false},
+    ];
+    return Container(
+      width: 70,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [context.bm.primary, context.bm.gradient2],
+          begin: Alignment.topCenter, end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Column(children: [
+        const SizedBox(height: 12),
+        Image.asset('assets/logo.png', width: 34, height: 34),
+        const SizedBox(height: 8),
+        Container(height: 1, color: Colors.white12),
+        const SizedBox(height: 6),
+        ...items.map((item) {
+          final idx = item['idx'] as int;
+          final isActive = _sidebarIdx == idx;
+          final hasFlyout = item['flyout'] as bool;
+          return GestureDetector(
+            onTap: () {
+              if (hasFlyout) {
+                setState(() => _flyoutIdx = _flyoutIdx == idx ? -1 : idx);
+              } else {
+                setState(() {
+                  _sidebarIdx = idx;
+                  _subPage = '';
+                  _flyoutIdx = -1;
+                });
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: double.infinity,
+              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(children: [
+                Stack(clipBehavior: Clip.none, children: [
+                  Icon(item['icon'] as IconData,
+                      color: isActive ? Colors.white : Colors.white60, size: 22),
+                  if (hasFlyout)
+                    Positioned(
+                      right: -8, bottom: -2,
+                      child: Icon(Icons.chevron_right,
+                          color: Colors.white38, size: 11),
+                    ),
+                ]),
+                const SizedBox(height: 3),
+                Text(item['label'] as String,
+                    style: TextStyle(
+                      color: isActive ? Colors.white : Colors.white60,
+                      fontSize: 9,
+                      fontWeight:
+                          isActive ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    textAlign: TextAlign.center),
+              ]),
+            ),
+          );
+        }),
+        const Spacer(),
+        // PIN/Token indicator
+        _buildGuruPinTokenBar(),
+        // Profil + Logout
+        GestureDetector(
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ProfilePage(user: widget.guru, canEdit: false))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: Colors.white24,
+              child: Text(widget.guru.initials,
+                  style: const TextStyle(color: Colors.white, fontSize: 11)),
+            ),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout, color: Colors.white54, size: 18),
+          onPressed: () => _confirmLogout(context),
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+        ),
+        const SizedBox(height: 8),
+      ]),
+    );
+  }
+
+  Widget _buildGuruFlyout() {
+    final flyItems = [
+      {'label': 'Penilaian', 'icon': Icons.list_alt_outlined, 'sub': 'penilaian'},
+      {'label': 'Tambah Ujian', 'icon': Icons.add_circle_outline, 'sub': 'tambah'},
+      {'label': 'Bank Soal', 'icon': Icons.library_books_outlined, 'sub': 'banksoal'},
+    ];
+    return Positioned(
+      left: 72,
+      top: 100,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 190,
+          decoration: BoxDecoration(
+            color: context.bm.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 16,
+                offset: const Offset(4, 4),
+              ),
+            ],
+            border: Border.all(color: Colors.grey.shade200.withValues(alpha: 0.2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: flyItems.map((item) {
+              final isActive = _subPage == item['sub'] as String;
+              return ListTile(
+                dense: true,
+                leading: Icon(item['icon'] as IconData,
+                    size: 18,
+                    color: isActive ? context.bm.primary : Colors.grey.shade500),
+                title: Text(item['label'] as String,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                      color: isActive ? context.bm.primary : Colors.grey.shade800,
+                    )),
+                tileColor: isActive
+                    ? context.bm.primary.withValues(alpha: 0.08)
+                    : null,
+                onTap: () {
+                  setState(() {
+                    _sidebarIdx = 1;
+                    _subPage = item['sub'] as String;
+                    _flyoutIdx = -1;
+                    if (_subPage == 'penilaian') _panelKelas = null;
+                  });
+                },
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKelasPanel() {
+    final jenjangList = <Map<String, dynamic>>[
+      {'label': 'Semua Kelas', 'value': null},
+      {'label': '— Kelas 7 —', 'value': '__sep7__'},
+      {'label': '7A', 'value': '7A'}, {'label': '7B', 'value': '7B'},
+      {'label': '7C', 'value': '7C'}, {'label': '7D', 'value': '7D'},
+      {'label': '— Kelas 8 —', 'value': '__sep8__'},
+      {'label': '8A', 'value': '8A'}, {'label': '8B', 'value': '8B'},
+      {'label': '8C', 'value': '8C'}, {'label': '8D', 'value': '8D'},
+      {'label': '— Kelas 9 —', 'value': '__sep9__'},
+      {'label': '9A', 'value': '9A'}, {'label': '9B', 'value': '9B'},
+      {'label': '9C', 'value': '9C'}, {'label': '9D', 'value': '9D'},
+    ];
+    return Container(
+      width: 220,
+      decoration: BoxDecoration(
+        color: context.bm.surface,
+        border: Border(
+          right: BorderSide(color: Colors.grey.shade200.withValues(alpha: 0.2)),
+        ),
+      ),
+      child: Column(children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          child: Row(children: [
+            Icon(Icons.quiz_outlined, size: 16, color: context.bm.primary),
+            const SizedBox(width: 8),
+            Text('Penilaian',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Colors.grey.shade800)),
+          ]),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            children: jenjangList.map((j) {
+              final val = j['value'] as String?;
+              final isSep = val != null && val.startsWith('__sep');
+              if (isSep) return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+                child: Text(j['label'] as String,
+                    style: TextStyle(fontSize: 10, color: Colors.grey.shade500,
+                        fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+              );
+              final isSelected = _panelKelas == val;
+              return InkWell(
+                onTap: () => setState(() => _panelKelas = val),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 11),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? context.bm.primary.withValues(alpha: 0.1)
+                        : Colors.transparent,
+                    border: isSelected
+                        ? Border(
+                            left: BorderSide(
+                                color: context.bm.primary, width: 3))
+                        : null,
+                  ),
+                  child: Text(j['label'] as String,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? context.bm.primary
+                            : Colors.grey.shade800,
+                      )),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildGuruWideContent() {
+    switch (_sidebarIdx) {
+      case 1:
+        switch (_subPage) {
+          case 'tambah':
+            return ExamCreatorForm(
+                allowedMapel: _isAdmin ? null : _mapelRoles);
+          case 'banksoal':
+            return ExamHistoryList(
+                filterMapel: _isAdmin ? null : _mapelRoles);
+          default:
+            return _buildPenilaianView();
+        }
+      case 2:
+        return RekapsNilaiScreen(
+            filterMapel: _isAdmin ? null : _mapelRoles);
+      case 3:
+        return AnalyticsScreen(
+            filterMapel: _isAdmin ? null : _mapelRoles);
+      case 4:
+        return JadwalScreen(role: _isAdmin ? 'admin1' : 'guru');
+      default:
+        return _berandaGuru();
+    }
+  }
+
+  Widget _buildPenilaianView() {
+    final tabLabels = ['Saat Ini', 'Terjadwal', 'Selesai', 'Draft'];
+    final tabColors = [Colors.green, Colors.blue, Colors.grey, Colors.orange];
+    return Column(children: [
+      // Header
+      Container(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+        color: context.bm.surface,
+        child: Row(children: [
+          Expanded(
+            child: Text(
+              _panelKelas != null ? 'Penilaian — ' + _panelKelas! : 'Semua Penilaian',
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: context.bm.primary,
+              foregroundColor: Colors.white,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => setState(() => _guruTab = 1),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Tambah Ujian',
+                style: TextStyle(fontSize: 13)),
+          ),
+        ]),
+      ),
+      // Tab bar
+      Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        color: context.bm.surface,
+        child: Row(
+          children: List.generate(tabLabels.length, (i) {
+            final isActive = _ujianTab == i;
+            return GestureDetector(
+              onTap: () => setState(() => _ujianTab = i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? tabColors[i].withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isActive
+                        ? tabColors[i]
+                        : Colors.grey.shade300,
+                  ),
+                ),
+                child: Text(tabLabels[i],
+                    style: TextStyle(
+                      color:
+                          isActive ? tabColors[i] : Colors.grey.shade600,
+                      fontSize: 12,
+                      fontWeight: isActive
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    )),
+              ),
+            );
+          }),
+        ),
+      ),
+      const SizedBox(height: 4),
+      const Divider(height: 1),
+      Expanded(
+        child: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('exam')
+              .snapshots(),
+          builder: (ctx, snap) {
+            if (!snap.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final all = snap.data!.docs
+                .map((d) => ExamData.fromFirestore(d))
+                .toList();
+            final filtered = all.where((e) {
+              if (!_isAdmin && !_mapelRoles.contains(e.mapel)) {
+                return false;
+              }
+              if (_panelKelas != null) {
+                if (e.targetKelas.isNotEmpty) {
+                  if (!e.targetKelas.contains(_panelKelas)) return false;
+                } else {
+                  if (!e.jenjang.contains(_panelKelas![0])) return false;
+                }
+              }
+              switch (_ujianTab) {
+                case 0:
+                  return e.isOngoing && !e.isDraft;
+                case 1:
+                  return e.belumMulai && !e.isDraft;
+                case 2:
+                  return e.sudahSelesai && !e.isDraft;
+                case 3:
+                  return e.isDraft;
+                default:
+                  return !e.isDraft;
+              }
+            }).toList();
+
+            if (filtered.isEmpty) {
+              return Center(
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inbox_outlined,
+                          size: 56,
+                          color: Colors.grey.shade300),
+                      const SizedBox(height: 12),
+                      Text('Tidak ada ujian',
+                          style: TextStyle(
+                              color: Colors.grey.shade400,
+                              fontSize: 14)),
+                    ]),
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: filtered.length,
+              separatorBuilder: (_, __) =>
+                  const SizedBox(height: 8),
+              itemBuilder: (ctx, i) => GestureDetector(
+                onTap: () => Navigator.push(ctx,
+                    MaterialPageRoute(builder: (_) => ExamHistoryScreen(exam: filtered[i]))),
+                child: _examCardWide(filtered[i]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  Widget _examCardWide(ExamData e) {
+    final isDraft = e.isDraft;
+    final isOngoing = e.isOngoing && !isDraft;
+    final isSelesai = e.sudahSelesai && !isDraft;
+    final Color statusColor = isDraft
+        ? Colors.orange
+        : isOngoing ? Colors.green : isSelesai ? Colors.grey : Colors.blue;
+    final String statusLabel = isDraft
+        ? 'Draft'
+        : isOngoing ? 'Berlangsung' : isSelesai ? 'Selesai' : 'Terjadwal';
+    final bool isNativeMode = e.mode == 'native';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade100),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+            child: Icon(Icons.quiz_outlined, color: statusColor, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(e.judul, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(e.mapel + '  •  ' + e.jenjang, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+          ])),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: statusColor.withValues(alpha: 0.3))),
+            child: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 9, fontWeight: FontWeight.bold)),
+          ),
+          if (isDraft) ...[
+            const SizedBox(width: 4),
+            IconButton(icon: const Icon(Icons.publish_outlined, size: 18), tooltip: 'Terbitkan', onPressed: () async {
+              await FirebaseFirestore.instance.collection('exam').doc(e.id).update({'status': 'published'});
+            }),
+          ],
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 4, children: [
+          if (e.kategori.isNotEmpty) _examBadge(e.kategori, Colors.purple.shade100, Colors.purple.shade700),
+          _examBadge(isNativeMode ? 'Via Aplikasi' : 'Via Google Form', Colors.blue.shade50, Colors.blue.shade600),
+          if (!isDraft) _examBadge(DateFormat('dd MMM, HH:mm').format(e.waktuMulai) + ' — ' + DateFormat('HH:mm').format(e.waktuSelesai), Colors.grey.shade100, Colors.grey.shade600),
+        ]),
+        if (e.creatorName.isNotEmpty || e.createdAt != null) ...[
+          const SizedBox(height: 6),
+          DefaultTextStyle(
+            style: TextStyle(color: Colors.grey.shade400, fontSize: 10),
+            child: Row(children: [
+              if (e.creatorName.isNotEmpty) ...[
+                const Icon(Icons.person_outline, size: 11, color: Colors.grey),
+                const SizedBox(width: 3),
+                Text(e.creatorName),
+                const SizedBox(width: 10),
+              ],
+              if (e.createdAt != null) ...[
+                const Icon(Icons.calendar_today_outlined, size: 11, color: Colors.grey),
+                const SizedBox(width: 3),
+                Text('Diterbitkan ' + DateFormat('dd MMM yyyy').format(e.createdAt!)),
+              ],
+            ]),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Widget _examBadge(String label, Color bg, Color fg) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+    child: Text(label, style: TextStyle(color: fg, fontSize: 9, fontWeight: FontWeight.w600)),
+  );
+
+  Widget _drawerSub(IconData icon, String label, bool selected, VoidCallback onTap) {
+    return ListTile(
+      contentPadding: const EdgeInsets.only(left: 52, right: 16),
+      leading: Icon(icon, size: 18, color: selected ? context.bm.primary : Colors.grey.shade600),
+      title: Text(label, style: TextStyle(
+        fontSize: 13,
+        color: selected ? context.bm.primary : Colors.grey.shade800,
+        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+      )),
+      selected: selected,
+      selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildGuruSideBar() {
+    return SafeArea(
+      child: Container(
+        color: context.bm.surface,
+        child: Column(children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [context.bm.primary, context.bm.gradient2],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              GestureDetector(
+                onTap: () => setState(() => _guruTab = 0),
+                child: Image.asset('assets/logo.png', width: 48, height: 48),
+              ),
+              const SizedBox(height: 10),
+              Text(widget.guru.nama,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+                child: Text(_isAdmin ? 'Admin & Guru' : 'Guru',
+                    style: const TextStyle(color: Colors.white70, fontSize: 10)),
+              ),
+            ]),
+          ),
+          Expanded(
+            child: ListView(padding: EdgeInsets.zero, children: [
+              ListTile(
+                leading: Image.asset('assets/logo.png', width: 20, height: 20),
+                title: const Text('Dashboard', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 0,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 0),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.person_outline, size: 20),
+                title: const Text('Profil Saya', style: TextStyle(fontSize: 13)),
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.guru, canEdit: false),
+                )),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.add_circle_outline, size: 20),
+                title: const Text('Buat Ujian', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 1,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 1),
+              ),
+              ListTile(
+                leading: const Icon(Icons.history_edu, size: 20),
+                title: const Text('History Ujian', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 2,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 2),
+              ),
+              ListTile(
+                leading: const Icon(Icons.grading, size: 20),
+                title: const Text('Rekap Nilai', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 3,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 3),
+              ),
+              ListTile(
+                leading: const Icon(Icons.bar_chart_outlined, size: 20),
+                title: const Text('Analitik', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 4,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 4),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_month_outlined, size: 20),
+                title: const Text('Jadwal', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 5,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 5),
+              ),
+              const Divider(height: 1),
+              _buildThemeSwitcher(),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red, size: 20),
+                title: const Text('Keluar', style: TextStyle(color: Colors.red, fontSize: 13)),
+                onTap: () => _confirmLogout(context),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
   }
 
   Widget _buildGuruDrawer() {
@@ -1899,40 +3340,42 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
               },
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.add_circle_outline),
-              title: const Text('Buat Ujian'),
-              selected: _guruTab == 0,
-              selectedColor: context.bm.primary,
-              onTap: () { Navigator.pop(context); setState(() => _guruTab = 0); },
-            ),
-            ListTile(
-              leading: const Icon(Icons.history_edu),
-              title: const Text('History Ujian'),
-              selected: _guruTab == 1,
-              selectedColor: context.bm.primary,
-              onTap: () { Navigator.pop(context); setState(() => _guruTab = 1); },
+            ExpansionTile(
+              leading: const Icon(Icons.quiz_outlined),
+              title: const Text('Ujian'),
+              initiallyExpanded: _guruTab == 1 || _guruTab == 2 || _guruTab == 10,
+              iconColor: context.bm.primary,
+              collapsedIconColor: Colors.grey,
+              childrenPadding: EdgeInsets.zero,
+              children: [
+                _drawerSub(Icons.fact_check_outlined, 'Penilaian', _guruTab == 10,
+                    () { Navigator.pop(context); setState(() => _guruTab = 10); }),
+                _drawerSub(Icons.add_circle_outline, 'Buat Ujian', _guruTab == 1,
+                    () { Navigator.pop(context); setState(() => _guruTab = 1); }),
+                _drawerSub(Icons.history_edu, 'Bank Soal / History', _guruTab == 2,
+                    () { Navigator.pop(context); setState(() => _guruTab = 2); }),
+              ],
             ),
             ListTile(
               leading: const Icon(Icons.grading),
               title: const Text('Rekap Nilai'),
-              selected: _guruTab == 2,
-              selectedColor: context.bm.primary,
-              onTap: () { Navigator.pop(context); setState(() => _guruTab = 2); },
-            ),
-            ListTile(
-              leading: const Icon(Icons.bar_chart_outlined),
-              title: const Text('Analitik'),
               selected: _guruTab == 3,
               selectedColor: context.bm.primary,
               onTap: () { Navigator.pop(context); setState(() => _guruTab = 3); },
             ),
             ListTile(
-              leading: const Icon(Icons.calendar_month_outlined),
-              title: const Text('Jadwal'),
+              leading: const Icon(Icons.bar_chart_outlined),
+              title: const Text('Analitik'),
               selected: _guruTab == 4,
               selectedColor: context.bm.primary,
               onTap: () { Navigator.pop(context); setState(() => _guruTab = 4); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_month_outlined),
+              title: const Text('Jadwal'),
+              selected: _guruTab == 5,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 5); },
             ),
             const Divider(height: 1),
             _buildThemeSwitcher(),
@@ -1988,7 +3431,8 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
 class ExamCreatorForm extends StatefulWidget {
   /// null = akses semua mapel (admin). Set<String> = filter mapel guru.
   final Set<String>? allowedMapel;
-  const ExamCreatorForm({super.key, this.allowedMapel});
+  final String? creatorName;
+  const ExamCreatorForm({super.key, this.allowedMapel, this.creatorName});
   @override
   State<ExamCreatorForm> createState() => _ExamCreatorFormState();
 }
@@ -2003,7 +3447,8 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
   final _judul     = TextEditingController();
   final _instruksi = TextEditingController();
   final _link      = TextEditingController();
-  String? _selMapel, _selKelas;
+  String? _selMapel, _selKelas, _selKategori;
+  Set<String> _selTargetKelas = {};
 
   // --- Pengaturan ---
   bool _anti = true, _cam = true, _auto = true;
@@ -2043,7 +3488,7 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
   }
 
   // ── Simpan ujian ke Firestore ──
-  Future<bool> _saveExam() async {
+  Future<bool> _saveExam({bool asDraft = false}) async {
     if (_judul.text.trim().isEmpty || _selMapel == null || _selKelas == null) {
       _snack("Lengkapi semua data ujian!", Colors.orange); return false;
     }
@@ -2072,6 +3517,10 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
         'mode'       : _isNative ? 'native' : 'form',
         'jumlahSoal' : 0,
         'createdAt'  : FieldValue.serverTimestamp(),
+        'status'     : asDraft ? 'draft' : 'published',
+        'kategori'   : _selKategori ?? '',
+        'creatorName': widget.creatorName ?? '',
+        'targetKelas': _selTargetKelas.toList(),
       };
       if (_savedExamId != null) {
         await FirebaseFirestore.instance.collection('exam').doc(_savedExamId).update(data);
@@ -2370,6 +3819,52 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
     ),
   );
 
+  // ── Selector kelas spesifik ──────────────────────────────────
+  Widget _buildTargetKelasSelector() {
+    final grade = _selKelas == 'Kelas 7' ? '7'
+        : _selKelas == 'Kelas 8' ? '8' : '9';
+    final classes = ['${grade}A', '${grade}B', '${grade}C', '${grade}D'];
+    final allSelected = classes.every((c) => _selTargetKelas.contains(c));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Text('Target Kelas Spesifik',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: () => setState(() {
+            if (allSelected) _selTargetKelas.clear();
+            else _selTargetKelas = Set.from(classes);
+          }),
+          child: Text(allSelected ? 'Batal Pilih Semua' : 'Pilih Semua',
+              style: TextStyle(color: context.bm.primary,
+                  fontSize: 12, fontWeight: FontWeight.w600)),
+        ),
+      ]),
+      const SizedBox(height: 4),
+      Text('Kosongkan = terbit ke semua kelas ${grade}',
+          style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, runSpacing: 6, children: classes.map((c) {
+        final selected = _selTargetKelas.contains(c);
+        return FilterChip(
+          label: Text('Kelas $c'),
+          selected: selected,
+          onSelected: (v) => setState(() {
+            if (v) _selTargetKelas.add(c);
+            else _selTargetKelas.remove(c);
+          }),
+          selectedColor: context.bm.primary.withValues(alpha: 0.15),
+          checkmarkColor: context.bm.primary,
+          labelStyle: TextStyle(
+            color: selected ? context.bm.primary : Colors.grey.shade700,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            fontSize: 13,
+          ),
+        );
+      }).toList()),
+    ]);
+  }
+
   // ============================================================
   // STEP 1: DATA UJIAN
   // ============================================================
@@ -2404,7 +3899,15 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
           const SizedBox(height: 14),
           _drop("Pilih Jenjang / Kelas", _selKelas,
               ["Kelas 7", "Kelas 8", "Kelas 9"],
-                  (v) => setState(() => _selKelas = v)),
+                  (v) => setState(() { _selKelas = v; _selTargetKelas = {}; })),
+          if (_selKelas != null) ...[
+            const SizedBox(height: 14),
+            _buildTargetKelasSelector(),
+          ],
+          const SizedBox(height: 14),
+          _drop("Kategori Ujian", _selKategori,
+              ["Sumatif", "Formatif", "Harian", "UTS", "UAS"],
+                  (v) => setState(() => _selKategori = v)),
           const SizedBox(height: 28),
           Row(children: [
             Expanded(child: OutlinedButton.icon(
@@ -2560,7 +4063,22 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
           icon : const Icon(Icons.arrow_back, size: 16),
           label: const Text("KEMBALI"),
         )),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 50)),
+          onPressed: _uploading ? null : () async {
+            final ok = await _saveExam(asDraft: true);
+            if (!ok) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Draft tersimpan!'), backgroundColor: Colors.orange));
+          },
+          icon: const Icon(Icons.save_outlined, size: 16),
+          label: const Text("DRAFT"),
+        ),
+        const SizedBox(width: 8),
         Expanded(flex: 2, child: ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
               backgroundColor: _isNative ? Colors.teal : Colors.green,
@@ -3319,11 +4837,9 @@ class _SoalCardState extends State<_SoalCard> {
               // Tipe soal selector
               const Text("Tipe Soal", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 6),
-              Row(children: [
+              Wrap(spacing: 8, runSpacing: 6, children: [
                 _tipePill("Pilihan Ganda", TipeSoal.pilihanGanda, Colors.blue),
-                const SizedBox(width: 6),
                 _tipePill("Benar/Salah", TipeSoal.benarSalah, Colors.green),
-                const SizedBox(width: 6),
                 _tipePill("Uraian", TipeSoal.uraian, Colors.orange),
               ]),
               const SizedBox(height: 14),
@@ -3756,27 +5272,11 @@ class _GuruRoleManagerState extends State<GuruRoleManager> {
             child: const Icon(Icons.manage_accounts, color: Color(0xFF0F172A), size: 22),
           ),
           const SizedBox(width: 14),
-          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Manajemen Role Guru', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             Text('Atur hak akses dan mata pelajaran setiap guru',
                 style: TextStyle(color: Colors.grey, fontSize: 12)),
-          ]),
-          const Spacer(),
-          // Legenda role
-          ...GuruRoleManager.availableRoles.map((r) => Container(
-            margin: const EdgeInsets.only(left: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: r.color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: r.color.withValues(alpha: 0.3)),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(r.icon, color: r.color, size: 13),
-              const SizedBox(width: 5),
-              Text(r.label, style: TextStyle(color: r.color, fontSize: 11, fontWeight: FontWeight.bold)),
-            ]),
-          )),
+          ])),
         ]),
       ),
 
@@ -4060,7 +5560,48 @@ class _GuruRoleCardState extends State<_GuruRoleCard> {
                     icon: const Icon(Icons.save, size: 14),
                     label: const Text('Simpan', style: TextStyle(fontSize: 12)),
                   ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 18, color: Colors.grey),
+                  onSelected: (val) async {
+                    if (val == 'reset') {
+                      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+                      final t = DateTime.now().microsecondsSinceEpoch;
+                      final newPass = List.generate(8, (i) => chars[(t ~/ (i + 1)) % chars.length]).join()
+                          + DateTime.now().millisecond.toString().padLeft(2, '0');
+                      await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(widget.guru.id)
+                          .update({'password': newPass});
+                      if (context.mounted) {
+                        showDialog(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                            title: const Text('Password Baru'),
+                            content: Column(mainAxisSize: MainAxisSize.min, children: [
+                              const Text('Password berhasil direset:', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                              const SizedBox(height: 12),
+                              _credRow(context, 'Username', widget.guru.username),
+                              const SizedBox(height: 8),
+                              _credRow(context, 'Password', newPass),
+                            ]),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
+                            ],
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'reset', child: Row(children: [
+                      Icon(Icons.lock_reset_outlined, size: 16, color: Colors.orange),
+                      SizedBox(width: 8),
+                      Text('Reset Password', style: TextStyle(fontSize: 13)),
+                    ])),
+                  ],
+                ),
+                const SizedBox(width: 4),
                 Icon(_expanded ? Icons.expand_less : Icons.expand_more,
                     color: Colors.grey),
               ]),
@@ -4258,6 +5799,35 @@ class _GuruRoleCardState extends State<_GuruRoleCard> {
                 color: item.ok ? Colors.black87 : Colors.grey))),
       ]),
     )).toList();
+  }
+
+  Widget _credRow(BuildContext ctx, String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+          const SizedBox(height: 2),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.5)),
+        ])),
+        IconButton(
+          icon: const Icon(Icons.copy_outlined, size: 18, color: Colors.blue),
+          tooltip: 'Salin',
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: value));
+            if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(
+              SnackBar(content: Text('$label disalin!'), duration: const Duration(seconds: 1)));
+          },
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+        ),
+      ]),
+    );
   }
 }
 
@@ -5681,14 +7251,33 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
   // ── Export CSV ──
   void _exportCSV(List<UserAccount> peserta) {
     final buf = StringBuffer();
-    buf.writeln("Nama,Kode,Kelas,Ruang,Status");
+    buf.writeln("Nama,Kode,Kelas,Ruang,Status,Keterangan");
     for (final s in peserta) {
-      buf.writeln("${s.nama},${s.kode},${s.classFolder},${s.ruang},${s.statusMengerjakan}");
+      final status = s.statusMengerjakan;
+      final ket = status == 'selesai' ? 'Selesai mengerjakan'
+          : status == 'melanggar' ? 'Terdeteksi melanggar'
+          : status == 'mengerjakan' ? 'Sedang mengerjakan'
+          : 'Belum mulai';
+      buf.writeln('"${s.nama}","${s.kode}","${s.classFolder}","${s.ruang}","$status","$ket"');
     }
+    final selesai = peserta.where((s) => s.statusMengerjakan == 'selesai').length;
+    final langgar = peserta.where((s) => s.statusMengerjakan == 'melanggar').length;
+    final mengerjakan = peserta.where((s) => s.statusMengerjakan == 'mengerjakan').length;
+    final belum = peserta.where((s) => s.statusMengerjakan == 'belum mulai').length;
+    buf.writeln('');
+    buf.writeln('"RINGKASAN"');
+    buf.writeln('"Total Peserta","${peserta.length}"');
+    buf.writeln('"Selesai","$selesai"');
+    buf.writeln('"Melanggar","$langgar"');
+    buf.writeln('"Mengerjakan","$mengerjakan"');
+    buf.writeln('"Belum Mulai","$belum"');
+    buf.writeln('"Ujian","${exam.judul}"');
+    buf.writeln('"Mapel","${exam.mapel}"');
+    buf.writeln('"Jenjang","${exam.jenjang}"');
     final csv = buf.toString();
     Clipboard.setData(ClipboardData(text: csv));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text("✅ Data CSV disalin ke clipboard! Paste ke Excel/Sheets."),
+      content: Text("✅ Data nilai disalin ke clipboard! Paste ke Excel/Sheets."),
       backgroundColor: Colors.green,
       duration: Duration(seconds: 4),
     ));
@@ -6333,11 +7922,20 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
   int _tab = 0;
   String _search = "";
   String _filter = "semua";
+  Set<int> _adminQuickActions = {1, 3, 5, 6, 7, 9};
+  // 3-col wide layout state
+  int _adminSidebarIdx = 0;  // 0=Dashboard,1=Ujian,2=Monitoring,3=Pengguna,4=Jadwal,5=Broadcast,6=Pengaturan
+  String _adminSubPage = ''; // submenu page identifier
+  String? _adminPanelKelas;  // selected kelas for penilaian panel
+  int _adminFlyoutIdx = -1;  // -1=none
+  int _adminUjianTab = 0;    // 0=saat ini,1=terjadwal,2=selesai,3=draft
+  String _broadcastTarget = 'semua'; // 'semua'|'guru'|'siswa'
 
   @override
   void initState() {
     super.initState();
     startIdleWatcher();
+    _loadAdminQuickActions();
   }
 
   @override
@@ -6368,7 +7966,10 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  @override
+  Widget build(BuildContext context) => _buildAdminNarrowLayout(context);
+
+  Widget _buildAdminNarrowLayout(BuildContext context) => Scaffold(
     key: _scaffoldKey,
     backgroundColor: context.bm.surface,
     drawer: _buildAdminDrawer(),
@@ -6382,72 +7983,121 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
         return SafeArea(
           bottom: false,
           child: Column(children: [
-          // Header
+          // ── Header Besar Admin ───────────────────────────────
           Container(
-            padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
-            color: Colors.white,
-            child: Row(children: [
-              IconButton(
-                icon: const Icon(Icons.menu, color: Color(0xFF60A5FA)),
-                tooltip: "Menu",
-                onPressed: () => _scaffoldKey.currentState!.openDrawer(),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [context.bm.primary, context.bm.gradient2],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
               ),
-              Icon(Icons.admin_panel_settings, color: context.bm.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text("Admin: ${widget.admin.nama}",
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(28),
+                bottomRight: Radius.circular(28),
               ),
-              // Badge ujian aktif
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('exam').snapshots(),
-                builder: (c, es) {
-                  if (!es.hasData) return const SizedBox();
-                  final n = es.data!.docs
-                      .map((d) => ExamData.fromFirestore(d))
-                      .where((e) => e.isOngoing)
-                      .length;
-                  if (n == 0) return const SizedBox();
-                  return Container(
-                    margin: const EdgeInsets.only(right: 8),
+              boxShadow: [BoxShadow(
+                color: context.bm.primary.withValues(alpha: 0.25),
+                blurRadius: 14, offset: const Offset(0, 6),
+              )],
+            ),
+            child: Column(children: [
+              // Baris atas
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                child: Row(children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu, color: Colors.white70),
+                    onPressed: () => _scaffoldKey.currentState!.openDrawer(),
+                  ),
+                  const Icon(Icons.school_outlined, color: Colors.white38, size: 14),
+                  const SizedBox(width: 4),
+                  const Expanded(child: Text("SMP Budi Mulia",
+                      style: TextStyle(color: Colors.white38, fontSize: 12))),
+                  Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                        color: Colors.green, borderRadius: BorderRadius.circular(20)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
-                      const SizedBox(width: 4),
-                      Text("$n Ujian Aktif",
-                          style: const TextStyle(color: Colors.white, fontSize: 11)),
-                    ]),
-                  );
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.logout),
-                tooltip: "Keluar",
-                onPressed: () => showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text("Keluar?"),
-                    content: const Text("Yakin ingin keluar dari sesi ini?"),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text("Batal")),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white),
-                        onPressed: () {
-                          Navigator.pop(context);
-                          Navigator.pushReplacement(context,
-                              MaterialPageRoute(builder: (_) => const LoginScreen()));
-                        },
-                        child: const Text("Keluar"),
-                      ),
-                    ],
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      DateFormat('EEE, dd MMM').format(DateTime.now()),
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
                   ),
-                ),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance.collection('exam').snapshots(),
+                    builder: (c, es) {
+                      if (!es.hasData) return const SizedBox();
+                      final n = es.data!.docs
+                          .map((d) => ExamData.fromFirestore(d))
+                          .where((e) => e.isOngoing).length;
+                      if (n == 0) return const SizedBox();
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(20)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.fiber_manual_record, color: Colors.white, size: 7),
+                          const SizedBox(width: 3),
+                          Text("$n Aktif", style: const TextStyle(color: Colors.white, fontSize: 10)),
+                        ]),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
+                    tooltip: "Keluar",
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text("Keluar?"),
+                        content: const Text("Yakin ingin keluar dari sesi ini?"),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal")),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red, foregroundColor: Colors.white),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              Navigator.pushReplacement(context,
+                                  MaterialPageRoute(builder: (_) => const LoginScreen()));
+                            },
+                            child: const Text("Keluar"),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+              // Baris utama: greeting + nama besar + avatar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 22),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(_adminGreetIcon(), color: Colors.amber, size: 18),
+                      const SizedBox(width: 6),
+                      Text(_adminGreetText(),
+                          style: const TextStyle(color: Colors.white70, fontSize: 15)),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(widget.admin.nama,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 24,
+                            fontWeight: FontWeight.bold, height: 1.2),
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 8),
+                    _headerBadge2('Administrator', Colors.purple, Icons.admin_panel_settings),
+                  ])),
+                  const SizedBox(width: 14),
+                  CircleAvatar(
+                    radius: 34,
+                    backgroundColor: Colors.white.withValues(alpha: 0.2),
+                    child: Text(widget.admin.initials,
+                        style: const TextStyle(color: Colors.white,
+                            fontWeight: FontWeight.bold, fontSize: 22)),
+                  ),
+                ]),
               ),
             ]),
           ),
@@ -6464,10 +8114,992 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
   );
 
   // Tab labels for header display
+  // ── Admin greeting helpers ─────────────────────────────────
+  String _adminGreetText() {
+    final h = DateTime.now().hour;
+    if (h < 11) return "Selamat Pagi";
+    if (h < 15) return "Selamat Siang";
+    if (h < 18) return "Selamat Sore";
+    return "Selamat Malam";
+  }
+
+  IconData _adminGreetIcon() {
+    final h = DateTime.now().hour;
+    if (h < 11) return Icons.wb_sunny;
+    if (h < 15) return Icons.wb_sunny_outlined;
+    if (h < 18) return Icons.wb_twilight;
+    return Icons.nightlight_round;
+  }
+
+  Widget _headerBadge2(String label, Color c, IconData icon) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(20)),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 11, color: Colors.white70),
+      const SizedBox(width: 4),
+      Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+    ]),
+  );
+
+  // ── Admin Quick Actions ────────────────────────────────────────
+  Future<void> _loadAdminQuickActions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('admin_quick_actions');
+    if (saved != null && mounted) {
+      setState(() => _adminQuickActions = saved.map(int.parse).toSet());
+    }
+  }
+
+  Future<void> _saveAdminQuickActions() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('admin_quick_actions',
+        _adminQuickActions.map((e) => e.toString()).toList());
+  }
+
+  List<Map<String, dynamic>> get _adminQuickActionItems => [
+    {'label': 'Buat Ujian', 'icon': Icons.add_task_outlined,          'tab': 1, 'color': const Color(0xFF1E88E5)},
+    {'label': 'Broadcast',  'icon': Icons.campaign_outlined,           'tab': 3, 'color': const Color(0xFFF4511E)},
+    {'label': 'Guru',       'icon': Icons.manage_accounts_outlined,    'tab': 4, 'color': const Color(0xFF7B1FA2)},
+    {'label': 'Siswa',      'icon': Icons.groups_outlined,             'tab': 5, 'color': const Color(0xFF00897B)},
+    {'label': 'History',    'icon': Icons.history_edu_outlined,        'tab': 6, 'color': const Color(0xFF546E7A)},
+    {'label': 'Rekap Nilai','icon': Icons.grading_outlined,            'tab': 7, 'color': const Color(0xFF039BE5)},
+    {'label': 'Analitik',   'icon': Icons.bar_chart_outlined,          'tab': 9, 'color': const Color(0xFFE65100)},
+    {'label': 'Jadwal',     'icon': Icons.calendar_month_outlined,     'tab': 10,'color': const Color(0xFF2E7D32)},
+    {'label': 'Pengaturan', 'icon': Icons.settings_outlined,           'tab': 8, 'color': const Color(0xFF37474F)},
+  ];
+
+  Future<void> _showAdminQuickActionsDialog() async {
+    final tmp = Set<int>.from(_adminQuickActions);
+    await showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text("Pilih Akses Cepat"),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ..._adminQuickActionItems.map((qa) {
+                final tab = qa['tab'] as int;
+                return CheckboxListTile(
+                  value: tmp.contains(tab),
+                  onChanged: (v) => setLocal(() => v! ? tmp.add(tab) : tmp.remove(tab)),
+                  title: Row(children: [
+                    Icon(qa['icon'] as IconData, color: qa['color'] as Color, size: 18),
+                    const SizedBox(width: 8),
+                    Text(qa['label'] as String),
+                  ]),
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.trailing,
+                );
+              }),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Batal")),
+            ElevatedButton(
+              onPressed: () {
+                setState(() => _adminQuickActions = tmp);
+                _saveAdminQuickActions();
+                Navigator.pop(ctx);
+              },
+              child: const Text("Simpan"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminQuickActionsGrid() {
+    final items = _adminQuickActionItems
+        .where((qa) => _adminQuickActions.contains(qa['tab'] as int))
+        .toList();
+    if (items.isEmpty) return const SizedBox();
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: items.map((qa) {
+        final color = qa['color'] as Color;
+        return GestureDetector(
+          onTap: () => setState(() => _tab = qa['tab'] as int),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.25)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(qa['icon'] as IconData, color: color, size: 16),
+              const SizedBox(width: 6),
+              Text(qa['label'] as String,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: color)),
+            ]),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ── Admin Kelas Selesai ────────────────────────────────────────
+  Widget _buildAdminKelasSelesai(List<UserAccount> siswa) {
+    if (siswa.isEmpty) return const SizedBox();
+    final Map<String, List<UserAccount>> byKelas = {};
+    for (final s in siswa) {
+      final k = s.classFolder;
+      if (k.isEmpty) continue;
+      byKelas.putIfAbsent(k, () => []).add(s);
+    }
+    final List<Widget> cards = [];
+    final sortedKelas = byKelas.keys.toList()..sort();
+    for (final kelas in sortedKelas) {
+      final students = byKelas[kelas]!;
+      if (students.isEmpty) continue;
+      final selesai = students.where((s) => s.statusMengerjakan == 'selesai').length;
+      final mengerjakan = students.where((s) => s.statusMengerjakan == 'mengerjakan').length;
+      if (selesai == students.length && selesai > 0) {
+        cards.add(_adminKelasSelesaiCard(kelas, selesai, students.length));
+      } else if (mengerjakan > 0 || selesai > 0) {
+        cards.add(_adminKelasProgressCard(kelas, selesai, students.length));
+      }
+    }
+    if (cards.isEmpty) return const SizedBox();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 20),
+      const Text("Status Per Kelas",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+      const SizedBox(height: 8),
+      ...cards,
+    ]);
+  }
+
+  Widget _adminKelasSelesaiCard(String kelas, int count, int total) => Container(
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: Colors.green.shade50,
+      border: Border.all(color: Colors.green.shade300),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(children: [
+      const Icon(Icons.check_circle, color: Colors.green, size: 22),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text("Kelas $kelas — Semua Selesai!",
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
+        Text("$count/$total siswa telah submit",
+            style: TextStyle(fontSize: 11, color: Colors.green.shade700)),
+      ])),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(20)),
+        child: const Text("100%",
+            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      ),
+    ]),
+  );
+
+  Widget _adminKelasProgressCard(String kelas, int selesai, int total) => Container(
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: Colors.blue.shade50,
+      border: Border.all(color: Colors.blue.shade200),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(children: [
+      Row(children: [
+        const Icon(Icons.pending_outlined, color: Colors.blue, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text("Kelas $kelas",
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+        Text("$selesai/$total", style: const TextStyle(color: Colors.grey, fontSize: 12)),
+      ]),
+      const SizedBox(height: 6),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: LinearProgressIndicator(
+          value: selesai / total,
+          minHeight: 6,
+          backgroundColor: Colors.blue.shade100,
+          valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+        ),
+      ),
+    ]),
+  );
+
   static const _tabLabels = [
     'Statistik', 'Upload Soal', 'Mata Pelajaran', 'Broadcast',
     'Manaj. Guru', 'Manaj. Siswa', 'History Ujian', 'Rekap Nilai', 'Pengaturan',
   ];
+
+  // ═══════════════════════════════════════════════════════════════
+  // ADMIN WIDE LAYOUT (≥1024px)
+  // ═══════════════════════════════════════════════════════════════
+
+  Widget _buildAdminWideLayout(BuildContext context) {
+    return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: context.bm.surface,
+      body: SafeArea(
+        child: GestureDetector(
+          onTap: () {
+            resetIdleTimer();
+            if (_adminFlyoutIdx >= 0) setState(() => _adminFlyoutIdx = -1);
+          },
+          behavior: HitTestBehavior.translucent,
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('users')
+                .snapshots(),
+            builder: (ctx, snap) {
+              final u = snap.hasData
+                  ? snap.data!.docs
+                      .map((d) => UserAccount.fromFirestore(d))
+                      .toList()
+                  : <UserAccount>[];
+              return Stack(children: [
+                Row(children: [
+                  _buildAdminIconSidebar(),
+                  if (_adminSidebarIdx == 1 &&
+                      _adminSubPage == 'penilaian')
+                    _buildAdminKelasPanel(),
+                  Expanded(child: _buildAdminWideContent(u)),
+                ]),
+                if (_adminFlyoutIdx >= 0) ...[
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () =>
+                          setState(() => _adminFlyoutIdx = -1),
+                      child: Container(color: Colors.transparent),
+                    ),
+                  ),
+                  _buildAdminFlyout(),
+                ],
+              ]);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminIconSidebar() {
+    final items = [
+      {'idx': 0, 'icon': Icons.dashboard_outlined, 'label': 'Dashboard', 'flyout': false},
+      {'idx': 1, 'icon': Icons.quiz_outlined, 'label': 'Ujian', 'flyout': true},
+      {'idx': 2, 'icon': Icons.monitor_heart_outlined, 'label': 'Monitor', 'flyout': true},
+      {'idx': 3, 'icon': Icons.group_outlined, 'label': 'Pengguna', 'flyout': true},
+      {'idx': 4, 'icon': Icons.calendar_month_outlined, 'label': 'Jadwal', 'flyout': false},
+      {'idx': 5, 'icon': Icons.campaign_outlined, 'label': 'Broadcast', 'flyout': false},
+      {'idx': 6, 'icon': Icons.settings_outlined, 'label': 'Pengaturan', 'flyout': false},
+    ];
+    return Container(
+      width: 70,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [context.bm.primary, context.bm.gradient2],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Column(children: [
+        const SizedBox(height: 12),
+        Image.asset('assets/logo.png', width: 34, height: 34),
+        const SizedBox(height: 8),
+        Container(height: 1, color: Colors.white12),
+        const SizedBox(height: 6),
+        ...items.map((item) {
+          final idx = item['idx'] as int;
+          final isActive = _adminSidebarIdx == idx;
+          final hasFlyout = item['flyout'] as bool;
+          return GestureDetector(
+            onTap: () {
+              if (hasFlyout) {
+                setState(() => _adminFlyoutIdx =
+                    _adminFlyoutIdx == idx ? -1 : idx);
+              } else {
+                setState(() {
+                  _adminSidebarIdx = idx;
+                  _adminSubPage = '';
+                  _adminFlyoutIdx = -1;
+                });
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: double.infinity,
+              margin:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(children: [
+                Stack(clipBehavior: Clip.none, children: [
+                  Icon(item['icon'] as IconData,
+                      color: isActive
+                          ? Colors.white
+                          : Colors.white60,
+                      size: 22),
+                  if (hasFlyout)
+                    Positioned(
+                      right: -8,
+                      bottom: -2,
+                      child: Icon(Icons.chevron_right,
+                          color: Colors.white38, size: 11),
+                    ),
+                ]),
+                const SizedBox(height: 3),
+                Text(item['label'] as String,
+                    style: TextStyle(
+                      color: isActive
+                          ? Colors.white
+                          : Colors.white60,
+                      fontSize: 9,
+                      fontWeight: isActive
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                    textAlign: TextAlign.center),
+              ]),
+            ),
+          );
+        }),
+        const Spacer(),
+        GestureDetector(
+          onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      ProfilePage(user: widget.admin, canEdit: false))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: Colors.white24,
+              child: Text(widget.admin.initials,
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 11)),
+            ),
+          ),
+        ),
+        IconButton(
+          icon:
+              const Icon(Icons.logout, color: Colors.white54, size: 18),
+          onPressed: () => showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text("Keluar?"),
+              content:
+                  const Text("Yakin ingin keluar dari sesi ini?"),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text("Batal")),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white),
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    final prefs =
+                        await SharedPreferences.getInstance();
+                    await prefs.remove('saved_user_id');
+                    await prefs.remove('saved_username');
+                    await prefs.remove('saved_password');
+                    if (context.mounted) {
+                      Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const LoginScreen()));
+                    }
+                  },
+                  child: const Text("Keluar"),
+                ),
+              ],
+            ),
+          ),
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+        ),
+        const SizedBox(height: 8),
+      ]),
+    );
+  }
+
+  Widget _buildAdminFlyout() {
+    final Map<int, List<Map<String, dynamic>>> flyoutMap = {
+      1: [
+        {'label': 'Penilaian', 'icon': Icons.list_alt_outlined, 'sub': 'penilaian'},
+        {'label': 'Tambah Ujian', 'icon': Icons.add_circle_outline, 'sub': 'tambah'},
+        {'label': 'Bank Soal', 'icon': Icons.library_books_outlined, 'sub': 'banksoal'},
+      ],
+      2: [
+        {'label': 'Monitor Siswa', 'icon': Icons.people_outline, 'sub': 'monitor'},
+        {'label': 'Rekap Nilai', 'icon': Icons.grading_outlined, 'sub': 'rekap'},
+        {'label': 'Analitik', 'icon': Icons.bar_chart_outlined, 'sub': 'analitik'},
+      ],
+      3: [
+        {'label': 'Data Guru', 'icon': Icons.manage_accounts_outlined, 'sub': 'guru'},
+        {'label': 'Data Siswa', 'icon': Icons.groups_outlined, 'sub': 'siswa'},
+      ],
+    };
+    final items = flyoutMap[_adminFlyoutIdx] ?? [];
+    if (items.isEmpty) return const SizedBox();
+    return Positioned(
+      left: 72,
+      top: 60.0 + _adminFlyoutIdx * 56.0,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 190,
+          decoration: BoxDecoration(
+            color: context.bm.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 16,
+                offset: const Offset(4, 4),
+              ),
+            ],
+            border: Border.all(
+                color: Colors.grey.shade200.withValues(alpha: 0.2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: items.map((item) {
+              final isActive = _adminSubPage == item['sub'] as String;
+              return ListTile(
+                dense: true,
+                leading: Icon(item['icon'] as IconData,
+                    size: 18,
+                    color: isActive
+                        ? context.bm.primary
+                        : Colors.grey.shade500),
+                title: Text(item['label'] as String,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isActive
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: isActive
+                          ? context.bm.primary
+                          : Colors.grey.shade800,
+                    )),
+                tileColor: isActive
+                    ? context.bm.primary.withValues(alpha: 0.08)
+                    : null,
+                onTap: () {
+                  setState(() {
+                    _adminSidebarIdx = _adminFlyoutIdx;
+                    _adminSubPage = item['sub'] as String;
+                    _adminFlyoutIdx = -1;
+                    if (_adminSubPage == 'penilaian') {
+                      _adminPanelKelas = null;
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminKelasPanel() {
+    final jenjangList = <Map<String, dynamic>>[
+      {'label': 'Semua Kelas', 'value': null},
+      {'label': '— Kelas 7 —', 'value': '__sep7__'},
+      {'label': '7A', 'value': '7A'}, {'label': '7B', 'value': '7B'},
+      {'label': '7C', 'value': '7C'}, {'label': '7D', 'value': '7D'},
+      {'label': '— Kelas 8 —', 'value': '__sep8__'},
+      {'label': '8A', 'value': '8A'}, {'label': '8B', 'value': '8B'},
+      {'label': '8C', 'value': '8C'}, {'label': '8D', 'value': '8D'},
+      {'label': '— Kelas 9 —', 'value': '__sep9__'},
+      {'label': '9A', 'value': '9A'}, {'label': '9B', 'value': '9B'},
+      {'label': '9C', 'value': '9C'}, {'label': '9D', 'value': '9D'},
+    ];
+    return Container(
+      width: 220,
+      decoration: BoxDecoration(
+        color: context.bm.surface,
+        border: Border(
+          right: BorderSide(
+              color: Colors.grey.shade200.withValues(alpha: 0.2)),
+        ),
+      ),
+      child: Column(children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          child: Row(children: [
+            Icon(Icons.quiz_outlined,
+                size: 16, color: context.bm.primary),
+            const SizedBox(width: 8),
+            Text('Penilaian',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Colors.grey.shade800)),
+          ]),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            children: jenjangList.map((j) {
+              final val = j['value'] as String?;
+              final isSep = val != null && val.startsWith('__sep');
+              if (isSep) return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+                child: Text(j['label'] as String,
+                    style: TextStyle(fontSize: 10, color: Colors.grey.shade500,
+                        fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+              );
+              final isSelected = _adminPanelKelas == val;
+              return InkWell(
+                onTap: () => setState(() => _adminPanelKelas = val),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 11),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? context.bm.primary
+                            .withValues(alpha: 0.1)
+                        : Colors.transparent,
+                    border: isSelected
+                        ? Border(
+                            left: BorderSide(
+                                color: context.bm.primary,
+                                width: 3))
+                        : null,
+                  ),
+                  child: Text(j['label'] as String,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? context.bm.primary
+                            : Colors.grey.shade800,
+                      )),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildAdminWideContent(List<UserAccount> u) {
+    switch (_adminSidebarIdx) {
+      case 1:
+        switch (_adminSubPage) {
+          case 'tambah':
+            return const ExamCreatorForm();
+          case 'banksoal':
+            return const ExamHistoryList();
+          default:
+            return _buildAdminPenilaianView();
+        }
+      case 2:
+        switch (_adminSubPage) {
+          case 'rekap':
+            return const RekapsNilaiScreen();
+          case 'analitik':
+            return const AnalyticsScreen(filterMapel: null);
+          default:
+            return _stats(u);
+        }
+      case 3:
+        switch (_adminSubPage) {
+          case 'siswa':
+            return _students(u);
+          default:
+            return const GuruRoleManager();
+        }
+      case 4:
+        return const JadwalScreen(role: 'admin1');
+      case 5:
+        return _broadcast();
+      case 6:
+        return _settings(u);
+      default:
+        return _stats(u);
+    }
+  }
+
+  Widget _buildAdminPenilaianView() {
+    final tabLabels = ['Saat Ini', 'Terjadwal', 'Selesai', 'Draft'];
+    final tabColors = [Colors.green, Colors.blue, Colors.grey, Colors.orange];
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+        color: context.bm.surface,
+        child: Row(children: [
+          Expanded(
+            child: Text(
+              _adminPanelKelas != null
+                  ? 'Penilaian — ' + _adminPanelKelas!
+                  : 'Semua Penilaian',
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: context.bm.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => setState(() => _tab = 1),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Tambah Ujian',
+                style: TextStyle(fontSize: 13)),
+          ),
+        ]),
+      ),
+      Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        color: context.bm.surface,
+        child: Row(
+          children: List.generate(tabLabels.length, (i) {
+            final isActive = _adminUjianTab == i;
+            return GestureDetector(
+              onTap: () => setState(() => _adminUjianTab = i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? tabColors[i].withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isActive
+                        ? tabColors[i]
+                        : Colors.grey.shade300,
+                  ),
+                ),
+                child: Text(tabLabels[i],
+                    style: TextStyle(
+                      color: isActive
+                          ? tabColors[i]
+                          : Colors.grey.shade600,
+                      fontSize: 12,
+                      fontWeight: isActive
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    )),
+              ),
+            );
+          }),
+        ),
+      ),
+      const SizedBox(height: 4),
+      const Divider(height: 1),
+      Expanded(
+        child: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('exam')
+              .snapshots(),
+          builder: (ctx, snap) {
+            if (!snap.hasData) {
+              return const Center(
+                  child: CircularProgressIndicator());
+            }
+            final all = snap.data!.docs
+                .map((d) => ExamData.fromFirestore(d))
+                .toList();
+            final filtered = all.where((e) {
+              if (_adminPanelKelas != null) {
+                if (e.targetKelas.isNotEmpty) {
+                  if (!e.targetKelas.contains(_adminPanelKelas)) return false;
+                } else {
+                  if (!e.jenjang.contains(_adminPanelKelas![0])) return false;
+                }
+              }
+              switch (_adminUjianTab) {
+                case 0:
+                  return e.isOngoing && !e.isDraft;
+                case 1:
+                  return e.belumMulai && !e.isDraft;
+                case 2:
+                  return e.sudahSelesai && !e.isDraft;
+                case 3:
+                  return e.isDraft;
+                default:
+                  return !e.isDraft;
+              }
+            }).toList();
+            if (filtered.isEmpty) {
+              return Center(
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inbox_outlined,
+                          size: 56,
+                          color: Colors.grey.shade300),
+                      const SizedBox(height: 12),
+                      Text('Tidak ada ujian',
+                          style: TextStyle(
+                              color: Colors.grey.shade400)),
+                    ]),
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: filtered.length,
+              separatorBuilder: (_, __) =>
+                  const SizedBox(height: 8),
+              itemBuilder: (ctx, i) =>
+                  GestureDetector(
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => ExamHistoryScreen(exam: filtered[i]))),
+                    child: _adminExamCard(filtered[i]),
+                  ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  Widget _adminExamCard(ExamData e) {
+    final isDraft = e.isDraft;
+    final isOngoing = e.isOngoing && !isDraft;
+    final isSelesai = e.sudahSelesai && !isDraft;
+    final Color statusColor = isDraft
+        ? Colors.orange
+        : isOngoing ? Colors.green : isSelesai ? Colors.grey : Colors.blue;
+    final String statusLabel = isDraft
+        ? 'Draft'
+        : isOngoing ? 'Berlangsung' : isSelesai ? 'Selesai' : 'Terjadwal';
+    final bool isNativeMode = e.mode == 'native';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade100),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+            child: Icon(Icons.quiz_outlined, color: statusColor, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(e.judul, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(e.mapel + '  •  ' + e.jenjang, style: TextStyle(color: Colors.grey.shade600, fontSize: 11)),
+          ])),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: statusColor.withValues(alpha: 0.3))),
+            child: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 9, fontWeight: FontWeight.bold)),
+          ),
+          if (isDraft) ...[
+            const SizedBox(width: 4),
+            IconButton(icon: const Icon(Icons.publish_outlined, size: 18), tooltip: 'Terbitkan', onPressed: () async {
+              await FirebaseFirestore.instance.collection('exam').doc(e.id).update({'status': 'published'});
+            }),
+          ],
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 4, children: [
+          if (e.kategori.isNotEmpty) _adminExamBadge(e.kategori, Colors.purple.shade100, Colors.purple.shade700),
+          _adminExamBadge(isNativeMode ? 'Via Aplikasi' : 'Via Google Form', Colors.blue.shade50, Colors.blue.shade600),
+          if (!isDraft) _adminExamBadge(DateFormat('dd MMM, HH:mm').format(e.waktuMulai) + ' — ' + DateFormat('HH:mm').format(e.waktuSelesai), Colors.grey.shade100, Colors.grey.shade600),
+        ]),
+        if (e.creatorName.isNotEmpty || e.createdAt != null) ...[
+          const SizedBox(height: 6),
+          DefaultTextStyle(
+            style: TextStyle(color: Colors.grey.shade400, fontSize: 10),
+            child: Row(children: [
+              if (e.creatorName.isNotEmpty) ...[
+                const Icon(Icons.person_outline, size: 11, color: Colors.grey),
+                const SizedBox(width: 3),
+                Text(e.creatorName),
+                const SizedBox(width: 10),
+              ],
+              if (e.createdAt != null) ...[
+                const Icon(Icons.calendar_today_outlined, size: 11, color: Colors.grey),
+                const SizedBox(width: 3),
+                Text('Diterbitkan ' + DateFormat('dd MMM yyyy').format(e.createdAt!)),
+              ],
+            ]),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Widget _adminExamBadge(String label, Color bg, Color fg) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+    child: Text(label, style: TextStyle(color: fg, fontSize: 9, fontWeight: FontWeight.w600)),
+  );
+
+  Widget _buildAdminSideBar() {
+    Widget _sectionLabel(String text) => Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(text,
+          style: const TextStyle(
+              fontSize: 10, fontWeight: FontWeight.bold,
+              color: Colors.grey, letterSpacing: 0.8)),
+    );
+    Widget _item(int tab, IconData icon, String label) => ListTile(
+      leading: Icon(icon, size: 20),
+      title: Text(label, style: const TextStyle(fontSize: 13)),
+      selected: _tab == tab,
+      selectedColor: context.bm.primary,
+      selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      onTap: () => setState(() => _tab = tab),
+    );
+    return SafeArea(
+      child: Container(
+        color: context.bm.surface,
+        child: Column(children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [context.bm.primary, context.bm.gradient2],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              GestureDetector(
+                onTap: () => setState(() => _tab = 0),
+                child: Image.asset('assets/logo.png', width: 48, height: 48),
+              ),
+              const SizedBox(height: 10),
+              Text(widget.admin.nama,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+                child: const Text('Administrator',
+                    style: TextStyle(color: Colors.white70, fontSize: 10)),
+              ),
+            ]),
+          ),
+          Expanded(
+            child: ListView(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8), children: [
+              ListTile(
+                leading: Image.asset('assets/logo.png', width: 20, height: 20),
+                title: const Text('Dashboard', style: TextStyle(fontSize: 13)),
+                selected: _tab == 0,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                onTap: () => setState(() => _tab = 0),
+              ),
+              const Divider(height: 8),
+              _sectionLabel('MONITORING'),
+              _item(0, Icons.dashboard_outlined, 'Statistik'),
+              _item(7, Icons.grading_outlined, 'Rekap Nilai'),
+              _item(9, Icons.bar_chart_outlined, 'Analitik'),
+              _item(10, Icons.calendar_month_outlined, 'Jadwal'),
+              const Divider(height: 8),
+              ListTile(
+                leading: const Icon(Icons.person_outline, size: 20),
+                title: const Text('Profil Saya', style: TextStyle(fontSize: 13)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.admin, canEdit: false),
+                )),
+              ),
+              const Divider(height: 8),
+              _sectionLabel('MANAJEMEN UJIAN'),
+              _item(1, Icons.add_task_outlined, 'Upload Soal'),
+              _item(2, Icons.menu_book_outlined, 'Mata Pelajaran'),
+              _item(6, Icons.history_edu_outlined, 'History Ujian'),
+              const Divider(height: 8),
+              _sectionLabel('PENGGUNA'),
+              _item(4, Icons.manage_accounts_outlined, 'Manaj. Guru'),
+              _item(5, Icons.groups_outlined, 'Manaj. Siswa'),
+              const Divider(height: 8),
+              _sectionLabel('SISTEM'),
+              ListTile(
+                leading: const Icon(Icons.campaign_outlined, size: 20),
+                title: const Text('Broadcast WA', style: TextStyle(fontSize: 13)),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (context) => const BroadcastWaScreen()),
+                ),
+              ),
+              _item(8, Icons.settings_outlined, 'Pengaturan'),
+              const Divider(height: 8),
+              _buildThemeSwitcher(),
+              const Divider(height: 8),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red, size: 20),
+                title: const Text('Keluar', style: TextStyle(color: Colors.red, fontSize: 13)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text("Keluar?"),
+                    content: const Text("Yakin ingin keluar dari sesi ini?"),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal")),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red, foregroundColor: Colors.white),
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.remove('saved_user_id');
+                          await prefs.remove('saved_username');
+                          await prefs.remove('saved_password');
+                          if (context.mounted) {
+                            Navigator.pushReplacement(context,
+                                MaterialPageRoute(builder: (_) => const LoginScreen()));
+                          }
+                        },
+                        child: const Text("Keluar"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
 
   Widget _buildAdminDrawer() {
     Widget _sectionLabel(String text) => Padding(
@@ -6482,9 +9114,9 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
       leading: Icon(icon, size: 20),
       title: Text(label, style: const TextStyle(fontSize: 14)),
       selected: _tab == tab,
-      selectedColor: const Color(0xFF0F172A),
-      selectedTileColor: const Color(0xFF0F172A08),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      selectedColor: context.bm.primary,
+      selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
       onTap: () { Navigator.pop(context); setState(() => _tab = tab); },
     );
@@ -6526,9 +9158,9 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
               leading: Image.asset('assets/logo.png', width: 22, height: 22),
               title: const Text('Dashboard', style: TextStyle(fontSize: 14)),
               selected: _tab == 0,
-              selectedColor: const Color(0xFF0F172A),
-              selectedTileColor: const Color(0x080F172A),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              selectedColor: context.bm.primary,
+              selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               onTap: () { Navigator.pop(context); setState(() => _tab = 0); },
             ),
             const Divider(height: 8),
@@ -6556,7 +9188,8 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
 
             // Group: Manajemen Ujian
             _sectionLabel('MANAJEMEN UJIAN'),
-            _item(1, Icons.add_task_outlined, 'Upload Soal'),
+            _item(20, Icons.fact_check_outlined, 'Penilaian'),
+            _item(1, Icons.add_task_outlined, 'Buat / Upload Soal'),
             _item(2, Icons.menu_book_outlined, 'Mata Pelajaran'),
             _item(6, Icons.history_edu_outlined, 'History Ujian'),
             const Divider(height: 8),
@@ -6569,21 +9202,7 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
 
 // Group: Sistem
             _sectionLabel('SISTEM'),
-// Ganti _item(3, ...) dengan ListTile di bawah ini:
-            ListTile(
-              leading: const Icon(Icons.campaign_outlined, size: 20),
-              title: const Text('Broadcast WA', style: TextStyle(fontSize: 14)),
-              trailing: const Icon(Icons.chevron_right, size: 18),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              onTap: () {
-                Navigator.pop(context); // Menutup drawer/menu terlebih dahulu
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const BroadcastWaScreen()),
-                );
-              },
-            ),
+            _item(3, Icons.campaign_outlined, 'Broadcast'),
             _item(8, Icons.settings_outlined, 'Pengaturan'),
             const Divider(height: 8),
             _buildThemeSwitcher(),
@@ -6654,6 +9273,40 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
         return const AnalyticsScreen(filterMapel: null);
       case 10:
         return const JadwalScreen(role: 'admin1');
+      case 20: return LayoutBuilder(builder: (ctx, cst) {
+        if (cst.maxWidth >= 600) {
+          return Row(children: [_buildAdminKelasPanel(), Expanded(child: _buildAdminPenilaianView())]);
+        }
+        final kelasAll = [null,'7A','7B','7C','7D','8A','8B','8C','8D','9A','9B','9C','9D'];
+        return Column(children: [
+          Container(
+            height: 44, color: context.bm.surface,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              children: kelasAll.map((c) {
+                final isActive = _adminPanelKelas == c;
+                return GestureDetector(
+                  onTap: () => setState(() => _adminPanelKelas = c),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isActive ? context.bm.primary : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(c ?? 'Semua', style: TextStyle(
+                      color: isActive ? Colors.white : Colors.grey.shade700,
+                      fontSize: 12, fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                    )),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          Expanded(child: _buildAdminPenilaianView()),
+        ]);
+      });
       default:
         return GestureDetector(
           onTap: resetIdleTimer,
@@ -6674,7 +9327,30 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(children: [
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ─ Akses Cepat ───────────────────────────────────────────
+        Row(children: [
+          const Expanded(child: Text("Akses Cepat",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+          GestureDetector(
+            onTap: _showAdminQuickActionsDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(20)),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.tune_outlined, size: 13, color: Colors.grey),
+                SizedBox(width: 4),
+                Text("Pilih", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ]),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        _buildAdminQuickActionsGrid(),
+        const SizedBox(height: 20),
+        // ─ Stat Cards ─────────────────────────────────────────────
         Row(children: [
           _statBox("Total Siswa", s.length.toString(), Colors.blue,
               Icons.groups),
@@ -6760,6 +9436,9 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
             );
           },
         ),
+
+        // ─ Status Per Kelas ─────────────────────────────────────
+        _buildAdminKelasSelesai(s),
       ]),
     );
   }
@@ -6833,64 +9512,108 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
 
   // ── Tab: Broadcast ──
   Widget _broadcast() {
+    return DefaultTabController(
+      length: 2,
+      child: Column(children: [
+        Container(
+          color: context.bm.surface,
+          child: TabBar(
+            labelColor: context.bm.primary,
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: context.bm.primary,
+            tabs: const [
+              Tab(icon: Icon(Icons.campaign_outlined, size: 18), text: 'Broadcast Aplikasi'),
+              Tab(icon: Icon(Icons.chat_bubble, size: 18), text: 'Broadcast WhatsApp'),
+            ],
+          ),
+        ),
+        Expanded(child: TabBarView(children: [
+          _broadcastAplikasi(),
+          _broadcastWa(),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _broadcastAplikasi() {
     final msgCtrl = TextEditingController();
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('settings')
-          .doc('broadcast')
-          .snapshots(),
+      stream: FirebaseFirestore.instance.collection('settings').doc('broadcast').snapshots(),
       builder: (c, snap) {
         String existing = "";
+        String existingTarget = "semua";
         if (snap.hasData && snap.data!.exists) {
-          existing =
-              (snap.data!.data() as Map)['message']?.toString() ?? "";
+          final d = snap.data!.data() as Map;
+          existing = d['message']?.toString() ?? "";
+          existingTarget = d['target']?.toString() ?? "semua";
         }
         return SingleChildScrollView(
-          padding: const EdgeInsets.all(30),
-          child: Column(children: [
-            const Icon(Icons.campaign,
-                color: Color(0xFF0F172A), size: 60),
-            const SizedBox(height: 14),
-            const Text("Broadcast ke Semua Siswa",
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            const Text(
-                "Pesan akan muncul sebagai notifikasi di layar ujian siswa.",
-                style: TextStyle(color: Colors.grey),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 24),
-            if (existing.isNotEmpty)
+          padding: const EdgeInsets.all(24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const SizedBox(height: 4),
+            Row(children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12)),
+                child: Icon(Icons.campaign, color: Colors.orange.shade700, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text("Broadcast Aplikasi", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Text("Pesan muncul sebagai notifikasi di aplikasi", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+              ]),
+            ]),
+            const SizedBox(height: 20),
+            if (existing.isNotEmpty) ...[
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange.shade200)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Pesan Aktif Saat Ini:",
-                        style: TextStyle(
-                            color: Colors.orange,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12)),
-                    const SizedBox(height: 6),
-                    Text(existing,
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w500)),
-                  ],
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orange.shade200),
                 ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Icon(Icons.info_outline, color: Colors.orange.shade700, size: 14),
+                    const SizedBox(width: 6),
+                    Text("Pesan Aktif — Target: ${existingTarget == 'semua' ? 'Semua Pengguna' : existingTarget == 'guru' ? 'Guru' : 'Siswa'}",
+                        style: TextStyle(color: Colors.orange.shade700, fontWeight: FontWeight.bold, fontSize: 11)),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(existing, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                ]),
               ),
+              const SizedBox(height: 12),
+            ],
+            const Text("Target Penerima", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, children: [
+              for (final t in [
+                {'val': 'semua', 'label': 'Semua Pengguna', 'icon': Icons.people_outline},
+                {'val': 'guru',  'label': 'Guru Saja',      'icon': Icons.school_outlined},
+                {'val': 'siswa', 'label': 'Siswa Saja',     'icon': Icons.person_outline},
+              ])
+                ChoiceChip(
+                  avatar: Icon(t['icon'] as IconData, size: 16,
+                      color: _broadcastTarget == t['val'] ? Colors.white : Colors.grey),
+                  label: Text(t['label'] as String),
+                  selected: _broadcastTarget == t['val'],
+                  selectedColor: context.bm.primary,
+                  labelStyle: TextStyle(
+                      color: _broadcastTarget == t['val'] ? Colors.white : Colors.grey.shade700,
+                      fontSize: 12),
+                  onSelected: (_) => setState(() => _broadcastTarget = t['val'] as String),
+                ),
+            ]),
             const SizedBox(height: 16),
             TextField(
               controller: msgCtrl,
               maxLines: 4,
               decoration: InputDecoration(
                 labelText: "Ketik Pesan Broadcast",
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                hintText: "Pesan yang akan ditampilkan kepada penerima...",
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
                 fillColor: Colors.grey.shade50,
               ),
@@ -6899,14 +9622,10 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
             Row(children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => FirebaseFirestore.instance
-                      .collection('settings')
-                      .doc('broadcast')
-                      .set({
-                    'message': '',
-                    'timestamp': FieldValue.serverTimestamp()
+                  onPressed: () => FirebaseFirestore.instance.collection('settings').doc('broadcast').set({
+                    'message': '', 'target': 'semua', 'timestamp': FieldValue.serverTimestamp(),
                   }),
-                  icon: const Icon(Icons.clear),
+                  icon: const Icon(Icons.clear, size: 16),
                   label: const Text("HAPUS PESAN"),
                 ),
               ),
@@ -6915,21 +9634,19 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
                 flex: 2,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
+                      backgroundColor: Colors.orange.shade700,
                       foregroundColor: Colors.white,
-                      minimumSize: const Size(0, 50)),
+                      minimumSize: const Size(0, 48)),
                   onPressed: () {
                     if (msgCtrl.text.trim().isEmpty) return;
-                    FirebaseFirestore.instance
-                        .collection('settings')
-                        .doc('broadcast')
-                        .set({
+                    FirebaseFirestore.instance.collection('settings').doc('broadcast').set({
                       'message': msgCtrl.text.trim(),
-                      'timestamp': FieldValue.serverTimestamp()
+                      'target': _broadcastTarget,
+                      'timestamp': FieldValue.serverTimestamp(),
                     });
                     msgCtrl.clear();
                   },
-                  icon: const Icon(Icons.send),
+                  icon: const Icon(Icons.send, size: 16),
                   label: const Text("KIRIM BROADCAST"),
                 ),
               ),
@@ -6937,6 +9654,43 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
           ]),
         );
       },
+    );
+  }
+
+  Widget _broadcastWa() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 68, height: 68,
+            decoration: BoxDecoration(color: const Color(0xFF25D366).withValues(alpha: 0.12), shape: BoxShape.circle),
+            child: const Icon(Icons.chat_bubble, color: Color(0xFF25D366), size: 36),
+          ),
+          const SizedBox(height: 16),
+          const Text("Broadcast WhatsApp", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          const SizedBox(height: 8),
+          Text("Kirim pesan broadcast ke nomor WhatsApp siswa atau guru yang terdaftar.",
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF25D366),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 52),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.chat_bubble, size: 20),
+              label: const Text("Buka Broadcast WhatsApp", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const BroadcastWaScreen())),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 
@@ -7101,6 +9855,42 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
                         v ? 'aktif' : 'terblokir'
                       }),
                     ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 18, color: Colors.grey),
+                      onSelected: (val) async {
+                        if (val == 'reset') {
+                          final chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+                          final rng = List.generate(8, (_) => chars[DateTime.now().microsecondsSinceEpoch % chars.length]).join();
+                          final newPass = rng + DateTime.now().millisecond.toString().padLeft(2, '0');
+                          await FirebaseFirestore.instance.collection('users').doc(x.id).update({'password': newPass});
+                          if (context.mounted) {
+                            showDialog(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                title: const Text('Password Baru'),
+                                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                                  const Text('Password berhasil direset:', style: TextStyle(color: Colors.grey)),
+                                  const SizedBox(height: 12),
+                                  _resetPassRow('Username', x.username),
+                                  const SizedBox(height: 8),
+                                  _resetPassRow('Password', newPass),
+                                ]),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
+                                ],
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(value: 'reset', child: Row(children: [
+                          Icon(Icons.lock_reset_outlined, size: 16, color: Colors.orange),
+                          SizedBox(width: 8),
+                          Text('Reset Password', style: TextStyle(fontSize: 13)),
+                        ])),
+                      ],
+                    ),
                   ],
                 ),
               )).toList(),
@@ -7109,6 +9899,37 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
         ),
       ),
     ]);
+  }
+
+  Widget _resetPassRow(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            const SizedBox(height: 2),
+            Text(value,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.5)),
+          ]),
+        ),
+        IconButton(
+          icon: const Icon(Icons.copy_outlined, size: 18, color: Colors.blue),
+          tooltip: 'Salin',
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: value));
+          },
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+        ),
+      ]),
+    );
   }
 
   // ── Tab: Settings ──
@@ -7602,9 +10423,10 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
         .snapshots()
         .listen((snap) {
       if (!mounted || !snap.exists) return;
-      final msg =
-          (snap.data() as Map?)?['message']?.toString() ?? "";
-      if (msg.isNotEmpty) {
+      final d = snap.data() as Map?;
+      final msg = d?['message']?.toString() ?? "";
+      final target = d?['target']?.toString() ?? 'semua';
+      if (msg.isNotEmpty && (target == 'semua' || target == 'siswa')) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
             const Icon(Icons.campaign, color: Colors.white),
@@ -7713,6 +10535,72 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
     );
   }
 
+  Widget _buildHomeSideBar() {
+    return SafeArea(
+      child: Container(
+        color: context.bm.surface,
+        child: Column(children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [context.bm.primary, context.bm.gradient2],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Image.asset('assets/logo.png', width: 48, height: 48),
+              const SizedBox(height: 10),
+              Text(widget.user.nama,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+                child: Text('Kelas ' + widget.user.kode + ' · Ruang ' + widget.user.ruang,
+                    style: const TextStyle(color: Colors.white70, fontSize: 10)),
+              ),
+            ]),
+          ),
+          Expanded(
+            child: ListView(padding: EdgeInsets.zero, children: [
+              ListTile(
+                leading: Image.asset('assets/logo.png', width: 20, height: 20),
+                title: const Text('Dashboard', style: TextStyle(fontSize: 13)),
+                onTap: () {},
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.calendar_month_outlined, size: 20),
+                title: const Text('Jadwal Ujian', style: TextStyle(fontSize: 13)),
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => JadwalScreen(role: 'siswa', userKode: widget.user.kode),
+                )),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.person_outline, size: 20),
+                title: const Text('Profil Saya', style: TextStyle(fontSize: 13)),
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ProfilePage(user: widget.user, canEdit: false),
+                )),
+              ),
+              const Divider(height: 1),
+              _buildThemeSwitcher(),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red, size: 20),
+                title: const Text('Keluar', style: TextStyle(color: Colors.red, fontSize: 13)),
+                onTap: () => _confirmLogout(context),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildHomeDrawer() {
     return Drawer(
       child: Column(children: [
@@ -7809,11 +10697,14 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: context.bm.surface,
-      drawer: _buildHomeDrawer(),
-      body: GestureDetector(
-        onTap: resetIdleTimer,
-        onPanDown: (_) => resetIdleTimer(),
-        behavior: HitTestBehavior.translucent,
+      drawer: MediaQuery.of(context).size.width >= 900 ? null : _buildHomeDrawer(),
+      body: Row(children: [
+        if (MediaQuery.of(context).size.width >= 900)
+          SizedBox(width: 240, child: _buildHomeSideBar()),
+        Expanded(child: GestureDetector(
+          onTap: resetIdleTimer,
+          onPanDown: (_) => resetIdleTimer(),
+          behavior: HitTestBehavior.translucent,
         child: _loading
           ? const Center(child: CircularProgressIndicator())
           : Stack(children: [
@@ -7822,7 +10713,7 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
           top: 0,
           left: 0,
           right: 0,
-          height: 230,
+          height: 270,
           child: Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -7830,77 +10721,90 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(32),
+                bottomRight: Radius.circular(32),
+              ),
+              boxShadow: [BoxShadow(
+                color: context.bm.primary.withValues(alpha: 0.25),
+                blurRadius: 16, offset: const Offset(0, 8),
+              )],
             ),
           ),
         ),
 
         SafeArea(
           child: Column(children: [
-            // Header bar
+            // ── Header bar siswa ──────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 12, 8, 0),
-              child: Row(children: [
-                IconButton(
-                  icon: const Icon(Icons.menu, color: Color(0xFF60A5FA)),
-                  tooltip: "Menu",
-                  onPressed: () => _scaffoldKey.currentState!.openDrawer(),
-                ),
-                Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Icon(greetIcon,
-                              color: Colors.amber, size: 16),
-                          const SizedBox(width: 5),
-                          Text(greeting,
-                              style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12)),
-                        ]),
-                        const SizedBox(height: 3),
-                        Text(widget.user.nama,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold),
-                            overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 5),
-                        Row(children: [
-                          _chip(Icons.class_,
-                              "Kelas ${widget.user.kode}"),
-                          const SizedBox(width: 6),
-                          _chip(Icons.meeting_room,
-                              "Ruang ${widget.user.ruang}"),
-                        ]),
-                      ]),
-                ),
-                // Avatar + logout
-                Column(children: [
+              padding: const EdgeInsets.fromLTRB(4, 10, 8, 0),
+              child: Column(children: [
+                // Baris atas: menu + sekolah + logout
+                Row(children: [
+                  if (MediaQuery.of(context).size.width < 900)
+                    IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.white70),
+                      onPressed: () => _scaffoldKey.currentState!.openDrawer(),
+                    ),
+                  const Icon(Icons.school_outlined, color: Colors.white38, size: 13),
+                  const SizedBox(width: 4),
+                  const Expanded(child: Text("SMP Budi Mulia",
+                      style: TextStyle(color: Colors.white38, fontSize: 12))),
                   Container(
-                    width: 52,
-                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.15),
-                      border: Border.all(
-                          color: Colors.white30, width: 2),
-                    ),
-                    child: Center(
-                      child: Text(widget.user.initials,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold)),
-                    ),
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20)),
+                    child: Text(DateFormat('EEE, dd MMM').format(now),
+                        style: const TextStyle(color: Colors.white70, fontSize: 11)),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.logout,
-                        color: Colors.white70, size: 18),
+                    icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
                     tooltip: "Keluar",
                     onPressed: () => _confirmLogout(context),
                   ),
                 ]),
+                // Baris utama: greeting + nama + avatar
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Icon(greetIcon, color: Colors.amber, size: 18),
+                        const SizedBox(width: 6),
+                        Text(greeting,
+                            style: const TextStyle(color: Colors.white70, fontSize: 15)),
+                      ]),
+                      const SizedBox(height: 4),
+                      Text(widget.user.nama,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 24,
+                              fontWeight: FontWeight.bold, height: 1.2),
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        _chip(Icons.class_, "Kelas ${widget.user.kode}"),
+                        const SizedBox(width: 6),
+                        _chip(Icons.meeting_room, "Ruang ${widget.user.ruang}"),
+                      ]),
+                    ])),
+                    const SizedBox(width: 12),
+                    Container(
+                      width: 58, height: 58,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: 0.2),
+                        border: Border.all(color: Colors.white30, width: 2),
+                      ),
+                      child: Center(
+                        child: Text(widget.user.initials,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 20,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ]),
+                ),
               ]),
             ),
 
@@ -8300,7 +11204,8 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
             ),
           ),
       ]),
-      ),
+      )),
+    ]),
     );
   }
 
@@ -8805,17 +11710,17 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
   }
 
   Widget _chip(IconData icon, String label) => Container(
-    padding:
-    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.15),
+      color: Colors.white.withValues(alpha: 0.18),
       borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white24, width: 0.5),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, color: Colors.white70, size: 11),
+      Icon(icon, color: Colors.white, size: 11),
       const SizedBox(width: 4),
       Text(label,
-          style: const TextStyle(color: Colors.white70, fontSize: 10)),
+          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)),
     ]),
   );
 
@@ -8924,8 +11829,10 @@ class _ExamScreenState extends State<ExamScreen>
         .snapshots()
         .listen((s) {
       if (!mounted || !s.exists) return;
-      final msg = (s.data() as Map?)?['message']?.toString() ?? "";
-      if (msg.isNotEmpty) {
+      final d = s.data() as Map?;
+      final msg = d?['message']?.toString() ?? "";
+      final target = d?['target']?.toString() ?? 'semua';
+      if (msg.isNotEmpty && (target == 'semua' || target == 'guru')) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
             const Icon(Icons.campaign, color: Colors.white),
@@ -9920,8 +12827,10 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
         .snapshots()
         .listen((s) {
       if (!mounted || !s.exists) return;
-      final msg = (s.data() as Map?)?['message']?.toString() ?? "";
-      if (msg.isNotEmpty && !_showKioskLock) {
+      final d = s.data() as Map?;
+      final msg = d?['message']?.toString() ?? "";
+      final target = d?['target']?.toString() ?? 'semua';
+      if (msg.isNotEmpty && !_showKioskLock && (target == 'semua' || target == 'siswa')) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
             const Icon(Icons.campaign, color: Colors.white),
@@ -11271,12 +14180,12 @@ Widget _buildThemeSwitcher() {
     builder: (ctx, setSt) {
       final themes = BMTheme.values;
       final themeColors = {
-        BMTheme.navy:   const Color(0xFF0F172A),
-        BMTheme.dark:   const Color(0xFF1E293B),
-        BMTheme.ocean:  const Color(0xFF0369A1),
-        BMTheme.forest: const Color(0xFF166534),
-        BMTheme.purple: const Color(0xFF6B21A8),
-        BMTheme.rose:   const Color(0xFF9F1239),
+        BMTheme.navy:   const Color(0xFF0D1117),
+        BMTheme.dark:   const Color(0xFF000000),
+        BMTheme.ocean:  const Color(0xFF0C1A3E),
+        BMTheme.forest: const Color(0xFF0A1F12),
+        BMTheme.purple: const Color(0xFF130A2A),
+        BMTheme.rose:   const Color(0xFF1A0510),
       };
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -12597,7 +15506,7 @@ class _BroadcastWaScreenState extends State<BroadcastWaScreen> {
       if (_selectedRuang == 'GURU') {
         query = query.where('role', isEqualTo: 'guru');
       } else if (_selectedRuang != 'Semua') {
-        query = query.where('ruang', isEqualTo: _selectedRuang);
+        query = query.where('kode', isEqualTo: _selectedRuang);
       }
       final snapshot = await query.get();
       setState(() {
@@ -12837,66 +15746,74 @@ class _BroadcastWaScreenState extends State<BroadcastWaScreen> {
                 end: Alignment.bottomRight,
               ),
             ),
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Template cepat
                 SizedBox(
-                  height: 36,
+                  height: 32,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: _templates.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 6),
                     itemBuilder: (ctx, i) => ActionChip(
-                      avatar: const Icon(Icons.bolt, size: 14, color: Colors.white70),
+                      avatar: const Icon(Icons.bolt, size: 12, color: Colors.white70),
                       label: Text(_templates[i]['label']!,
                           style: const TextStyle(fontSize: 11, color: Colors.white)),
                       onPressed: () =>
                           setState(() => _pesanController.text = _templates[i]['text']!),
-                      backgroundColor: Colors.white.withOpacity(0.15),
-                      side: BorderSide(color: Colors.white.withOpacity(0.3)),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      backgroundColor: Colors.white.withValues(alpha: 0.14),
+                      side: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      visualDensity: VisualDensity.compact,
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                // Text field pesan
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 2))],
-                  ),
-                  child: TextField(
-                    controller: _pesanController,
-                    maxLines: 3,
-                    style: const TextStyle(fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: 'Tulis pengumuman untuk dikirim via WhatsApp...',
-                      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.all(14),
+                const SizedBox(height: 8),
+                // Text field pesan + tombol test dalam Row
+                Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: TextField(
+                        controller: _pesanController,
+                        maxLines: 2,
+                        minLines: 2,
+                        style: const TextStyle(fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: 'Tulis pengumuman...',
+                          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.all(12),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
                     ),
-                    onChanged: (_) => setState(() {}),
                   ),
-                ),
-                const SizedBox(height: 10),
-                // Tombol test
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white54),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                  const SizedBox(width: 8),
+                  // Tombol test compact
+                  SizedBox(
+                    height: 56,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white54),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      onPressed: _isLoading ? null : _kirimTestKeSaya,
+                      child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.send_to_mobile_outlined, size: 18),
+                        SizedBox(height: 2),
+                        Text('Test', style: TextStyle(fontSize: 10)),
+                      ]),
                     ),
-                    onPressed: _isLoading ? null : _kirimTestKeSaya,
-                    icon: const Icon(Icons.send_to_mobile_outlined, size: 16),
-                    label: const Text('Kirim Test ke Nomor Saya', style: TextStyle(fontSize: 13)),
                   ),
-                ),
+                ]),
               ],
             ),
           ),
@@ -13041,8 +15958,11 @@ class _BroadcastWaScreenState extends State<BroadcastWaScreen> {
                           final isSelected = _selectedUserIds[u['id']] == true;
                           final isGuru = u['role']?.toString() == 'guru';
                           final nama = u['nama'] ?? '-';
-                          final ruang = u['ruang'] ?? '';
-                          final roleLabel = isGuru ? 'GURU' : (ruang.isNotEmpty ? 'Kelas $ruang' : '-');
+                          final kode = u['kode']?.toString() ?? '';
+                          final ruang = u['ruang']?.toString() ?? '';
+                          final roleLabel = isGuru
+                              ? 'GURU'
+                              : (kode.isNotEmpty ? 'Kelas $kode' : (ruang.isNotEmpty ? 'Ruang $ruang' : '-'));
 
                           return InkWell(
                             onTap: () => setState(() => _selectedUserIds[u['id']] = !isSelected),

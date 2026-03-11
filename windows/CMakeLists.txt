@@ -2,6 +2,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(asesmensmpbm LANGUAGES CXX)
 
+# Fix: Firebase C++ SDK pakai cmake_minimum_required < 3.5 yang tidak kompatibel
+# dengan CMake 3.30+. Override agar tetap bisa di-build.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.30")
+  set(CMAKE_POLICY_VERSION_MINIMUM "3.5" CACHE STRING "" FORCE)
+endif()
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "asesmensmpbm")
