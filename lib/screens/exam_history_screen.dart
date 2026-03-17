@@ -1358,6 +1358,15 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     final hardCount = items.where((i) => (i['difficulty'] as double) < 0.3).length;
     final medCount = items.length - easyCount - hardCount;
 
+    // Recommendations
+    int keepCount = 0, reviseCount = 0, discardCount = 0;
+    for (final item in items) {
+      final rec = _getRecommendation(item['difficulty'] as double, item['discrimination'] as double);
+      if (rec == 'pertahankan') keepCount++;
+      else if (rec == 'revisi') reviseCount++;
+      else discardCount++;
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1386,6 +1395,14 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                 _analysisSummaryCard("Soal Baik", "$goodCount", Colors.green, Icons.thumb_up),
                 const SizedBox(width: 8),
                 _analysisSummaryCard("Soal Buruk", "$poorCount", Colors.red, Icons.thumb_down),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                _analysisSummaryCard("Pertahankan", "$keepCount", Colors.green, Icons.check_circle),
+                const SizedBox(width: 8),
+                _analysisSummaryCard("Revisi", "$reviseCount", Colors.orange, Icons.edit_note),
+                const SizedBox(width: 8),
+                _analysisSummaryCard("Buang", "$discardCount", Colors.red, Icons.delete_outline),
               ]),
             ]),
           ),
@@ -1504,6 +1521,28 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                         style: TextStyle(fontSize: 10, color: discColor, fontWeight: FontWeight.w600)),
                   ),
                 ]),
+                const SizedBox(height: 6),
+                // Recommendation badge
+                Row(children: [
+                  _buildRecommendationBadge(difficulty, discrimination),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => _saveSoalToBank(soal),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.save_alt, size: 12, color: Colors.teal),
+                        SizedBox(width: 4),
+                        Text("Simpan ke Bank", style: TextStyle(fontSize: 10, color: Colors.teal, fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+                ]),
 
                 // Distractor analysis for PG
                 if (soal.tipe == TipeSoal.pilihanGanda && optCounts.isNotEmpty) ...[
@@ -1546,14 +1585,20 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
 
         // Export analisis button
         const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
             onPressed: _exportAnalisisCSV,
             icon: const Icon(Icons.download),
-            label: const Text("Export Analisis Butir Soal (CSV)"),
-          ),
-        ),
+            label: const Text("Export CSV"),
+          )),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+            onPressed: () => _saveAllGoodToBank(items),
+            icon: const Icon(Icons.save_alt, color: Colors.teal),
+            label: const Text("Simpan Soal Baik ke Bank"),
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.teal),
+          )),
+        ]),
         const SizedBox(height: 40),
       ]),
     );
@@ -1589,6 +1634,187 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
       ),
       child: Text(text, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
     );
+  }
+
+  // ── Recommendation logic ──
+  String _getRecommendation(double difficulty, double discrimination) {
+    if (discrimination >= 0.3 && difficulty >= 0.2 && difficulty <= 0.8) return 'pertahankan';
+    if (discrimination < 0.1 || difficulty < 0.1 || difficulty > 0.95) return 'buang';
+    return 'revisi';
+  }
+
+  Widget _buildRecommendationBadge(double difficulty, double discrimination) {
+    final rec = _getRecommendation(difficulty, discrimination);
+    Color c;
+    IconData icon;
+    String label;
+    switch (rec) {
+      case 'pertahankan':
+        c = Colors.green; icon = Icons.check_circle; label = 'PERTAHANKAN';
+        break;
+      case 'buang':
+        c = Colors.red; icon = Icons.delete_outline; label = 'BUANG';
+        break;
+      default:
+        c = Colors.orange; icon = Icons.edit_note; label = 'REVISI';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: c.withValues(alpha: 0.4)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: c),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 10, color: c, fontWeight: FontWeight.bold)),
+      ]),
+    );
+  }
+
+  Future<void> _saveSoalToBank(SoalModel soal) async {
+    String topik = '';
+    String tingkat = 'sedang';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.save_alt, color: Colors.teal),
+            SizedBox(width: 8),
+            Text("Simpan ke Bank Soal", style: TextStyle(fontSize: 16)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text("Soal No. ${soal.nomor}: ${soal.pertanyaan.length > 60 ? '${soal.pertanyaan.substring(0, 60)}...' : soal.pertanyaan}",
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 12),
+            TextFormField(
+              decoration: const InputDecoration(labelText: "Topik / Bab", isDense: true, border: OutlineInputBorder()),
+              onChanged: (v) => topik = v,
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              value: tingkat,
+              decoration: const InputDecoration(labelText: "Tingkat Kesulitan", isDense: true, border: OutlineInputBorder()),
+              items: const [
+                DropdownMenuItem(value: 'mudah', child: Text("Mudah")),
+                DropdownMenuItem(value: 'sedang', child: Text("Sedang")),
+                DropdownMenuItem(value: 'sulit', child: Text("Sulit")),
+              ],
+              onChanged: (v) => setSt(() => tingkat = v ?? 'sedang'),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text("Simpan"),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+
+    await FirebaseFirestore.instance.collection('bank_soal').add({
+      'mapel': exam.mapel,
+      'topik': topik.trim().isNotEmpty ? topik.trim() : exam.judul,
+      'tingkatKesulitan': tingkat,
+      'tipe': soal.tipe.name,
+      'pertanyaan': soal.pertanyaan,
+      'gambar': soal.gambar,
+      'pilihan': soal.pilihan,
+      'kunciJawaban': soal.kunciJawaban,
+      'skor': soal.skor,
+      'createdAt': FieldValue.serverTimestamp(),
+      'sourceExamId': exam.id,
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Soal berhasil disimpan ke Bank Soal!"), backgroundColor: Colors.green,
+      ));
+    }
+  }
+
+  Future<void> _saveAllGoodToBank(List<Map<String, dynamic>> items) async {
+    final goodItems = items.where((i) {
+      final d = i['difficulty'] as double;
+      final disc = i['discrimination'] as double;
+      return _getRecommendation(d, disc) == 'pertahankan';
+    }).toList();
+
+    if (goodItems.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Tidak ada soal dengan rekomendasi 'Pertahankan'."), backgroundColor: Colors.orange,
+        ));
+      }
+      return;
+    }
+
+    String topik = '';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.save_alt, color: Colors.teal),
+          SizedBox(width: 8),
+          Text("Simpan Soal Baik ke Bank", style: TextStyle(fontSize: 16)),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text("${goodItems.length} soal dengan rekomendasi 'Pertahankan' akan disimpan ke Bank Soal.",
+              style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 12),
+          TextFormField(
+            decoration: const InputDecoration(labelText: "Topik / Bab", isDense: true, border: OutlineInputBorder()),
+            onChanged: (v) => topik = v,
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text("Simpan ${goodItems.length} Soal"),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final item in goodItems) {
+      final soal = item['soal'] as SoalModel;
+      final difficulty = item['difficulty'] as double;
+      String tingkat = 'sedang';
+      if (difficulty >= 0.7) tingkat = 'mudah';
+      else if (difficulty < 0.3) tingkat = 'sulit';
+
+      batch.set(FirebaseFirestore.instance.collection('bank_soal').doc(), {
+        'mapel': exam.mapel,
+        'topik': topik.trim().isNotEmpty ? topik.trim() : exam.judul,
+        'tingkatKesulitan': tingkat,
+        'tipe': soal.tipe.name,
+        'pertanyaan': soal.pertanyaan,
+        'gambar': soal.gambar,
+        'pilihan': soal.pilihan,
+        'kunciJawaban': soal.kunciJawaban,
+        'skor': soal.skor,
+        'createdAt': FieldValue.serverTimestamp(),
+        'sourceExamId': exam.id,
+      });
+    }
+    await batch.commit();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("${goodItems.length} soal berhasil disimpan ke Bank Soal!"),
+        backgroundColor: Colors.green,
+      ));
+    }
   }
 
   // ── Export Analisis CSV ──
@@ -1970,6 +2196,460 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
     }
   }
 
+  // ── Fitur Darurat: Pause / Resume Ujian ──
+  Future<void> _togglePauseExam() async {
+    final willPause = !exam.isPaused;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(children: [
+          Icon(willPause ? Icons.pause_circle : Icons.play_arrow, color: willPause ? Colors.red : Colors.green),
+          const SizedBox(width: 8),
+          Text(willPause ? "Pause Ujian?" : "Resume Ujian?"),
+        ]),
+        content: Text(willPause
+            ? "Semua siswa akan dihentikan sementara dari ujian ini.\nGunakan fitur ini hanya untuk keadaan darurat (listrik mati, masalah teknis, dll)."
+            : "Siswa akan dapat melanjutkan ujian dari soal terakhir yang dikerjakan."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: willPause ? Colors.red : Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(willPause ? "Pause Sekarang" : "Resume Sekarang"),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await FirebaseFirestore.instance.collection('exam').doc(exam.id).update({
+      'isPaused': willPause,
+      if (willPause) 'pausedAt': FieldValue.serverTimestamp(),
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(willPause ? "Ujian dijeda! Semua siswa akan dihentikan." : "Ujian dilanjutkan!"),
+        backgroundColor: willPause ? Colors.red : Colors.green,
+      ));
+    }
+  }
+
+  // ── Fitur Darurat: Extend Waktu Per Siswa ──
+  Future<void> _extendWaktuPerSiswa(List<UserAccount> peserta) async {
+    final mengerjakan = peserta.where((s) => _statusForExam(s) == 'mengerjakan' || _statusForExam(s) == 'melanggar').toList();
+    if (mengerjakan.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Tidak ada siswa yang sedang mengerjakan."), backgroundColor: Colors.orange,
+        ));
+      }
+      return;
+    }
+
+    final selected = <UserAccount>{};
+    int menitTambah = 15;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.person_add_alt_1, color: Colors.teal),
+            SizedBox(width: 8),
+            Text("Tambah Waktu Per Siswa", style: TextStyle(fontSize: 16)),
+          ]),
+          content: SizedBox(
+            width: 400,
+            height: 400,
+            child: Column(children: [
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                IconButton(
+                  icon: const Icon(Icons.remove_circle, color: Colors.red, size: 28),
+                  onPressed: menitTambah > 5 ? () => setSt(() => menitTambah -= 5) : null,
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(10)),
+                  child: Text("$menitTambah menit", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal)),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_circle, color: Colors.green, size: 28),
+                  onPressed: () => setSt(() => menitTambah += 5),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Text("${selected.length} siswa dipilih", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => setSt(() {
+                    if (selected.length == mengerjakan.length) {
+                      selected.clear();
+                    } else {
+                      selected.addAll(mengerjakan);
+                    }
+                  }),
+                  child: Text(selected.length == mengerjakan.length ? "Batal Pilih" : "Pilih Semua", style: const TextStyle(fontSize: 12)),
+                ),
+              ]),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: mengerjakan.length,
+                  itemBuilder: (c, i) {
+                    final s = mengerjakan[i];
+                    return CheckboxListTile(
+                      dense: true,
+                      value: selected.contains(s),
+                      onChanged: (v) => setSt(() => v! ? selected.add(s) : selected.remove(s)),
+                      title: Text(s.nama, style: const TextStyle(fontSize: 13)),
+                      subtitle: Text("${s.kode} • ${s.classFolder}", style: const TextStyle(fontSize: 11)),
+                    );
+                  },
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+              onPressed: selected.isEmpty ? null : () => Navigator.pop(ctx, true),
+              child: const Text("Tambahkan"),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || selected.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final s in selected) {
+      batch.update(
+        FirebaseFirestore.instance.collection('users').doc(s.id),
+        {
+          'exam_status.${exam.id}.extraMinutes': FieldValue.increment(menitTambah),
+          'exam_status.${exam.id}.extendedAt': FieldValue.serverTimestamp(),
+        },
+      );
+    }
+    await batch.commit();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("$menitTambah menit ditambahkan untuk ${selected.length} siswa!"),
+        backgroundColor: Colors.teal,
+      ));
+    }
+  }
+
+  // ── Fitur Darurat: Reset Siswa & Lanjutkan dari Soal Terakhir ──
+  Future<void> _resetResumeSiswa(List<UserAccount> peserta) async {
+    final crashedOrViolated = peserta.where((s) {
+      final st = _statusForExam(s);
+      return st == 'melanggar' || st == 'mengerjakan';
+    }).toList();
+
+    if (crashedOrViolated.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Tidak ada siswa yang perlu direset."), backgroundColor: Colors.orange,
+        ));
+      }
+      return;
+    }
+
+    final selected = <UserAccount>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.replay, color: Colors.purple),
+            SizedBox(width: 8),
+            Text("Reset & Lanjutkan", style: TextStyle(fontSize: 16)),
+          ]),
+          content: SizedBox(
+            width: 400,
+            height: 400,
+            child: Column(children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8)),
+                child: const Text(
+                  "Siswa yang dipilih akan direset ke status 'belum mulai' tetapi jawaban yang sudah disimpan akan dipertahankan. "
+                  "Saat masuk kembali, siswa akan melanjutkan dari soal terakhir.",
+                  style: TextStyle(fontSize: 12, color: Colors.purple),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Text("${selected.length} dipilih", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => setSt(() {
+                    if (selected.length == crashedOrViolated.length) selected.clear();
+                    else selected.addAll(crashedOrViolated);
+                  }),
+                  child: Text(selected.length == crashedOrViolated.length ? "Batal Pilih" : "Pilih Semua", style: const TextStyle(fontSize: 12)),
+                ),
+              ]),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: crashedOrViolated.length,
+                  itemBuilder: (c, i) {
+                    final s = crashedOrViolated[i];
+                    final st = _statusForExam(s);
+                    return CheckboxListTile(
+                      dense: true,
+                      value: selected.contains(s),
+                      onChanged: (v) => setSt(() => v! ? selected.add(s) : selected.remove(s)),
+                      title: Text(s.nama, style: const TextStyle(fontSize: 13)),
+                      subtitle: Text("${s.kode} • Status: $st", style: const TextStyle(fontSize: 11)),
+                      secondary: Icon(
+                        st == 'melanggar' ? Icons.warning : Icons.edit,
+                        color: st == 'melanggar' ? Colors.red : Colors.indigo,
+                        size: 18,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
+              onPressed: selected.isEmpty ? null : () => Navigator.pop(ctx, true),
+              child: const Text("Reset & Lanjutkan"),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || selected.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final s in selected) {
+      batch.update(
+        FirebaseFirestore.instance.collection('users').doc(s.id),
+        {
+          'exam_status.${exam.id}.status': 'belum mulai',
+          'exam_status.${exam.id}.resumeFromLast': true,
+          'exam_status.${exam.id}.violationCount': 0,
+          'exam_status.${exam.id}.resetAt': FieldValue.serverTimestamp(),
+        },
+      );
+    }
+    await batch.commit();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("${selected.length} siswa direset! Mereka dapat melanjutkan dari soal terakhir."),
+        backgroundColor: Colors.purple,
+      ));
+    }
+  }
+
+  // ── Remedial Otomatis dari Bank Soal ──
+  Future<void> _createRemedialFromBank(List<UserAccount> peserta) async {
+    if (_scoreData == null) await _loadScores();
+    final Map<String, double> scores = {};
+    for (final s in peserta) {
+      final sd = _scoreData?[s.id];
+      if (sd != null) scores[s.id] = (sd['totalNilai'] as num?)?.toDouble() ?? 0;
+    }
+
+    final tidakTuntas = peserta.where((s) => (scores[s.id] ?? 0) < exam.kkm).toList();
+    if (tidakTuntas.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Semua siswa sudah tuntas!"), backgroundColor: Colors.green,
+        ));
+      }
+      return;
+    }
+
+    // Check if bank soal has questions for this mapel
+    final bankSnap = await FirebaseFirestore.instance.collection('bank_soal')
+        .where('mapel', isEqualTo: exam.mapel).get();
+
+    if (bankSnap.docs.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Tidak ada soal di Bank Soal untuk mapel '${exam.mapel}'. Tambahkan soal terlebih dahulu."),
+          backgroundColor: Colors.orange, duration: const Duration(seconds: 4),
+        ));
+      }
+      return;
+    }
+
+    int jumlahSoal = 10;
+    int propMudah = 40, propSedang = 40, propSulit = 20;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.healing, color: Colors.deepOrange),
+            SizedBox(width: 8),
+            Text("Remedial dari Bank Soal", style: TextStyle(fontSize: 16)),
+          ]),
+          content: SizedBox(
+            width: 450,
+            child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.deepOrange.shade50, borderRadius: BorderRadius.circular(8)),
+                child: Text(
+                  "${tidakTuntas.length} siswa belum tuntas (KKM: ${exam.kkm}).\n"
+                  "Soal remedial akan diambil acak dari Bank Soal mapel '${exam.mapel}' "
+                  "(${bankSnap.docs.length} soal tersedia).",
+                  style: const TextStyle(fontSize: 12, color: Colors.deepOrange),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                const Text("Jumlah Soal: ", style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(width: 80, child: TextFormField(
+                  initialValue: jumlahSoal.toString(),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
+                  onChanged: (v) => jumlahSoal = int.tryParse(v) ?? 10,
+                )),
+              ]),
+              const SizedBox(height: 12),
+              const Text("Proporsi Tingkat Kesulitan:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 8),
+              _propSlider("Mudah", Colors.green, propMudah, (v) => setSt(() { propMudah = v; propSedang = (100 - propMudah - propSulit).clamp(0, 100); })),
+              _propSlider("Sedang", Colors.orange, propSedang, (v) => setSt(() { propSedang = v; propSulit = (100 - propMudah - propSedang).clamp(0, 100); })),
+              _propSlider("Sulit", Colors.red, propSulit, (v) => setSt(() { propSulit = v; propSedang = (100 - propMudah - propSulit).clamp(0, 100); })),
+              Text("Total: ${propMudah + propSedang + propSulit}%",
+                  style: TextStyle(fontWeight: FontWeight.bold,
+                      color: (propMudah + propSedang + propSulit) == 100 ? Colors.green : Colors.red)),
+            ])),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Batal")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text("Buat Remedial"),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      // Pick random questions from bank
+      final countMudah = (jumlahSoal * propMudah / 100).round();
+      final countSulit = (jumlahSoal * propSulit / 100).round();
+      final countSedang = jumlahSoal - countMudah - countSulit;
+
+      List<QueryDocumentSnapshot> pickRandom(String tingkat, int count) {
+        final filtered = bankSnap.docs.where((d) => (d.data() as Map)['tingkatKesulitan'] == tingkat).toList()..shuffle(Random());
+        return filtered.take(count).toList();
+      }
+
+      final soalDocs = [...pickRandom('mudah', countMudah), ...pickRandom('sedang', countSedang), ...pickRandom('sulit', countSulit)]..shuffle(Random());
+
+      if (soalDocs.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Tidak cukup soal di bank untuk membuat remedial!"), backgroundColor: Colors.orange,
+          ));
+        }
+        return;
+      }
+
+      // Pick date
+      if (!mounted) return;
+      final pickedDate = await showDatePicker(
+        context: context,
+        initialDate: DateTime.now().add(const Duration(days: 1)),
+        firstDate: DateTime.now(),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+      );
+      if (pickedDate == null || !mounted) return;
+      final pickedStart = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(exam.waktuMulai));
+      if (pickedStart == null || !mounted) return;
+      final pickedEnd = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(exam.waktuSelesai));
+      if (pickedEnd == null || !mounted) return;
+
+      final newStart = DateTime(pickedDate.year, pickedDate.month, pickedDate.day, pickedStart.hour, pickedStart.minute);
+      final newEnd = DateTime(pickedDate.year, pickedDate.month, pickedDate.day, pickedEnd.hour, pickedEnd.minute);
+
+      // Create exam
+      final newDoc = await FirebaseFirestore.instance.collection('exam').add({
+        'judul': '[Remedial] ${exam.judul}',
+        'mapel': exam.mapel, 'jenjang': exam.jenjang,
+        'antiCurang': exam.antiCurang, 'maxCurang': exam.maxCurang,
+        'kameraAktif': exam.kameraAktif, 'autoSubmit': exam.autoSubmit,
+        'waktuMulai': Timestamp.fromDate(newStart), 'waktuSelesai': Timestamp.fromDate(newEnd),
+        'instruksi': exam.instruksi, 'link': '', 'mode': 'native',
+        'jumlahSoal': soalDocs.length,
+        'createdAt': FieldValue.serverTimestamp(),
+        'status': 'draft', 'kategori': exam.kategori,
+        'creatorName': exam.creatorName,
+        'targetKelas': exam.targetKelas,
+        'kkm': exam.kkm, 'spiType': 'remedial', 'parentExamId': exam.id,
+      });
+
+      // Upload soal
+      final batch = FirebaseFirestore.instance.batch();
+      for (int i = 0; i < soalDocs.length; i++) {
+        final d = soalDocs[i].data() as Map<String, dynamic>;
+        batch.set(
+          FirebaseFirestore.instance.collection('exam').doc(newDoc.id).collection('soal').doc(),
+          {
+            'nomor': i + 1,
+            'tipe': d['tipe'] ?? 'pilihanGanda',
+            'pertanyaan': d['pertanyaan'] ?? '',
+            'gambar': d['gambar'] ?? '',
+            'pilihan': d['pilihan'] ?? [],
+            'kunciJawaban': d['kunciJawaban'] ?? '',
+            'skor': d['skor'] ?? 1,
+          },
+        );
+      }
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Ujian remedial berhasil dibuat dengan ${soalDocs.length} soal dari Bank Soal!"),
+          backgroundColor: Colors.green, duration: const Duration(seconds: 4),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Gagal membuat remedial: $e"), backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
+  Widget _propSlider(String label, Color color, int value, ValueChanged<int> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        SizedBox(width: 55, child: Text("$label:", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12))),
+        Expanded(child: Slider(value: value.toDouble(), min: 0, max: 100, divisions: 20, activeColor: color, label: "$value%",
+            onChanged: (v) => onChanged(v.round()))),
+        SizedBox(width: 35, child: Text("$value%", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+      ]),
+    );
+  }
+
   // ── Buat Ujian Remedial / Susulan ──
   Future<void> _createRemedialExam(List<UserAccount> peserta, Map<String, double> scores) async {
     final exam = widget.exam;
@@ -2235,9 +2915,13 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                   icon: const Icon(Icons.more_vert),
                   onSelected: (v) {
                     if (v == 'extend') _extendWaktu();
+                    if (v == 'extend_student') _extendWaktuPerSiswa(peserta);
+                    if (v == 'pause') _togglePauseExam();
                     if (v == 'reset') _resetSemua(peserta);
+                    if (v == 'reset_resume') _resetResumeSiswa(peserta);
                     if (v == 'pdf_rapor') _exportPDF(peserta);
                     if (v == 'pdf_proktor') _exportProktorReport(peserta);
+                    if (v == 'remedial_bank') _createRemedialFromBank(peserta);
                   },
                   itemBuilder: (_) => [
                     const PopupMenuItem(value: 'pdf_rapor', child: Row(children: [
@@ -2247,12 +2931,31 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
                       Icon(Icons.security, color: Colors.orange), SizedBox(width: 8), Text("Laporan Proktor"),
                     ])),
                     const PopupMenuDivider(),
+                    // ── Fitur Darurat ──
+                    PopupMenuItem(value: 'pause', child: Row(children: [
+                      Icon(exam.isPaused ? Icons.play_arrow : Icons.pause_circle,
+                          color: exam.isPaused ? Colors.green : Colors.red),
+                      const SizedBox(width: 8),
+                      Text(exam.isPaused ? "Resume Ujian" : "Pause Ujian (Darurat)"),
+                    ])),
                     const PopupMenuItem(value: 'extend', child: Row(children: [
-                      Icon(Icons.timer, color: Colors.blue), SizedBox(width: 8), Text("Tambah Waktu Ujian"),
+                      Icon(Icons.timer, color: Colors.blue), SizedBox(width: 8), Text("Tambah Waktu (Semua)"),
+                    ])),
+                    const PopupMenuItem(value: 'extend_student', child: Row(children: [
+                      Icon(Icons.person_add_alt_1, color: Colors.teal), SizedBox(width: 8), Text("Tambah Waktu (Per Siswa)"),
                     ])),
                     const PopupMenuItem(value: 'reset', child: Row(children: [
                       Icon(Icons.refresh, color: Colors.orange), SizedBox(width: 8), Text("Reset Semua Status"),
                     ])),
+                    const PopupMenuItem(value: 'reset_resume', child: Row(children: [
+                      Icon(Icons.replay, color: Colors.purple), SizedBox(width: 8), Text("Reset & Lanjutkan (Per Siswa)"),
+                    ])),
+                    if (exam.kkm > 0) ...[
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(value: 'remedial_bank', child: Row(children: [
+                        Icon(Icons.healing, color: Colors.deepOrange), SizedBox(width: 8), Text("Remedial dari Bank Soal"),
+                      ])),
+                    ],
                   ],
                 ),
               ]),

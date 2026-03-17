@@ -395,6 +395,8 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
       case 3:  return RekapsNilaiScreen(filterMapel: _isAdmin ? null : _mapelRoles);
       case 4:  return AnalyticsScreen(filterMapel: _isAdmin ? null : _mapelRoles);
       case 5:  return JadwalScreen(role: _isAdmin ? 'admin1' : 'guru');
+      case 6:  return BankSoalScreen(filterMapel: _isAdmin ? null : _mapelRoles);
+      case 7:  return RemedialTrackingScreen(filterMapel: _isAdmin ? null : _mapelRoles);
       case 10: return LayoutBuilder(builder: (ctx, cst) {
         if (cst.maxWidth >= 600) {
           return Row(children: [_buildKelasPanel(), Expanded(child: _buildPenilaianView())]);
@@ -469,9 +471,11 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
   List<Map<String, dynamic>> get _quickActionItems => [
     {'label': 'Buat Ujian',  'icon': Icons.add_circle_outline,    'tab': 1, 'color': const Color(0xFF1E88E5)},
     {'label': 'History',     'icon': Icons.history_edu,            'tab': 2, 'color': const Color(0xFF7B1FA2)},
+    {'label': 'Bank Soal',   'icon': Icons.library_books_outlined, 'tab': 6, 'color': const Color(0xFF6D4C41)},
     {'label': 'Rekap Nilai', 'icon': Icons.grading,                'tab': 3, 'color': const Color(0xFF00897B)},
     {'label': 'Analitik',    'icon': Icons.bar_chart_outlined,     'tab': 4, 'color': const Color(0xFFF4511E)},
     {'label': 'Jadwal',      'icon': Icons.calendar_month_outlined,'tab': 5, 'color': const Color(0xFF039BE5)},
+    {'label': 'Remedial',    'icon': Icons.healing_outlined,       'tab': 7, 'color': const Color(0xFFE65100)},
     {'label': 'Profil',      'icon': Icons.person_outline,         'tab': -1,'color': const Color(0xFF546E7A)},
   ];
 
@@ -1148,7 +1152,7 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
             return ExamCreatorForm(
                 allowedMapel: _isAdmin ? null : _mapelRoles);
           case 'banksoal':
-            return ExamHistoryList(
+            return BankSoalScreen(
                 filterMapel: _isAdmin ? null : _mapelRoles);
           default:
             return _buildPenilaianView();
@@ -1490,12 +1494,28 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
                 onTap: () => setState(() => _guruTab = 4),
               ),
               ListTile(
+                leading: const Icon(Icons.library_books_outlined, size: 20),
+                title: const Text('Bank Soal', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 6,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 6),
+              ),
+              ListTile(
                 leading: const Icon(Icons.calendar_month_outlined, size: 20),
                 title: const Text('Jadwal', style: TextStyle(fontSize: 13)),
                 selected: _guruTab == 5,
                 selectedColor: context.bm.primary,
                 selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
                 onTap: () => setState(() => _guruTab = 5),
+              ),
+              ListTile(
+                leading: const Icon(Icons.healing_outlined, size: 20),
+                title: const Text('Tracking Remedial', style: TextStyle(fontSize: 13)),
+                selected: _guruTab == 7,
+                selectedColor: context.bm.primary,
+                selectedTileColor: context.bm.primary.withValues(alpha: 0.08),
+                onTap: () => setState(() => _guruTab = 7),
               ),
               const Divider(height: 1),
               _buildThemeSwitcher(),
@@ -1577,8 +1597,10 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
                     () { Navigator.pop(context); setState(() => _guruTab = 10); }),
                 _drawerSub(Icons.add_circle_outline, 'Buat Ujian', _guruTab == 1,
                     () { Navigator.pop(context); setState(() => _guruTab = 1); }),
-                _drawerSub(Icons.history_edu, 'Bank Soal / History', _guruTab == 2,
+                _drawerSub(Icons.history_edu, 'History Ujian', _guruTab == 2,
                     () { Navigator.pop(context); setState(() => _guruTab = 2); }),
+                _drawerSub(Icons.library_books_outlined, 'Bank Soal', _guruTab == 6,
+                    () { Navigator.pop(context); setState(() => _guruTab = 6); }),
               ],
             ),
             ListTile(
@@ -1601,6 +1623,13 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
               selected: _guruTab == 5,
               selectedColor: context.bm.primary,
               onTap: () { Navigator.pop(context); setState(() => _guruTab = 5); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.healing_outlined),
+              title: const Text('Tracking Remedial'),
+              selected: _guruTab == 7,
+              selectedColor: context.bm.primary,
+              onTap: () { Navigator.pop(context); setState(() => _guruTab = 7); },
             ),
             const Divider(height: 1),
             _buildThemeSwitcher(),

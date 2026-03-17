@@ -81,6 +81,8 @@ part 'screens/analytics_screen.dart';
 part 'screens/jadwal_screen.dart';
 part 'screens/broadcast_wa_screen.dart';
 part 'screens/live_monitoring_screen.dart';
+part 'screens/bank_soal_screen.dart';
+part 'screens/remedial_tracking_screen.dart';
 
 
 // ============================================================

@@ -821,6 +821,18 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
         badgeColor: Colors.orange,
         onTap     : () => setState(() => _soalMethod = 'template'),
       ),
+      const SizedBox(height: 14),
+      _modeCard(
+        selected  : _soalMethod == 'bank',
+        icon      : Icons.library_books,
+        iconBg    : Colors.teal.shade50,
+        iconColor : Colors.teal,
+        title     : "Tarik dari Bank Soal",
+        subtitle  : "Ambil soal dari Bank Soal yang sudah tersimpan. Pilih manual atau otomatis.",
+        badge     : "Cepat & Terstruktur",
+        badgeColor: Colors.teal,
+        onTap     : () => setState(() => _soalMethod = 'bank'),
+      ),
       const SizedBox(height: 36),
       Row(children: [
         Expanded(child: OutlinedButton.icon(
@@ -833,7 +845,28 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
           style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white,
               minimumSize: const Size(0, 50)),
-          onPressed: _soalMethod == null ? null : () => setState(() => _step = 4),
+          onPressed: _soalMethod == null ? null : () async {
+            if (_soalMethod == 'bank') {
+              // Save exam first if needed
+              if (_savedExamId == null) {
+                final ok = await _saveExam(asDraft: true);
+                if (!ok) return;
+              }
+              if (!mounted) return;
+              final drafts = await showBankSoalPickerDialog(context, mapel: _selMapel, filterMapel: widget.allowedMapel);
+              if (drafts != null && drafts.isNotEmpty) {
+                setState(() {
+                  _soals.addAll(drafts);
+                  _editingIndex = 0;
+                  _soalMethod = 'manual';
+                  _step = 4;
+                });
+                _snack("${drafts.length} soal ditarik dari Bank Soal!", Colors.green);
+              }
+            } else {
+              setState(() => _step = 4);
+            }
+          },
           icon : const Icon(Icons.arrow_forward),
           label: const Text("LANJUT"),
         )),
@@ -847,19 +880,30 @@ class _ExamCreatorFormState extends State<ExamCreatorForm> {
   Widget _stepSoalEditor() {
     if (_soals.isEmpty) { _soals.add(SoalDraft()); _editingIndex = 0; }
     return Column(children: [
-      // Banner: switch ke template
+      // Banner: switch ke template or bank
       Container(
         color: Colors.orange.shade50,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(children: [
           const Icon(Icons.upload_file, color: Colors.orange, size: 18),
           const SizedBox(width: 8),
-          const Expanded(child: Text("Ingin upload dari template Word?",
+          const Expanded(child: Text("Upload template Word atau tarik dari Bank Soal?",
               style: TextStyle(color: Colors.orange, fontSize: 12))),
           TextButton(
             onPressed: () => setState(() { _soalMethod = 'template'; _docxParsed = false; }),
-            child: const Text("Upload Template",
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
+            child: const Text("Template",
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 11)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final drafts = await showBankSoalPickerDialog(context, mapel: _selMapel, filterMapel: widget.allowedMapel);
+              if (drafts != null && drafts.isNotEmpty) {
+                setState(() { _soals.addAll(drafts); _editingIndex = 0; });
+                _snack("${drafts.length} soal ditarik dari Bank Soal!", Colors.green);
+              }
+            },
+            child: const Text("Bank Soal",
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal, fontSize: 11)),
           ),
         ]),
       ),

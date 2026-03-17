@@ -111,6 +111,7 @@ class ExamData {
   final int kkm; // Kriteria Ketuntasan Minimal (0 = tidak aktif)
   final String spiType; // reguler, susulan, remedial
   final String? parentExamId; // ID ujian induk untuk susulan/remedial
+  final bool isPaused; // Fitur Darurat: ujian dijeda
 
   ExamData({
     required this.id,
@@ -134,6 +135,7 @@ class ExamData {
     this.kkm = 0,
     this.spiType = 'reguler',
     this.parentExamId,
+    this.isPaused = false,
   });
 
   factory ExamData.fromFirestore(DocumentSnapshot doc) {
@@ -161,6 +163,7 @@ class ExamData {
       kkm: data['kkm'] ?? 0,
       spiType: data['spiType'] ?? 'reguler',
       parentExamId: data['parentExamId'],
+      isPaused: data['isPaused'] ?? false,
     );
   }
 

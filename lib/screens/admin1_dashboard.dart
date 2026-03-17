@@ -1133,8 +1133,10 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
               const Divider(height: 8),
               _sectionLabel('MANAJEMEN UJIAN'),
               _item(1, Icons.add_task_outlined, 'Upload Soal'),
+              _item(11, Icons.library_books_outlined, 'Bank Soal'),
               _item(2, Icons.menu_book_outlined, 'Mata Pelajaran'),
               _item(6, Icons.history_edu_outlined, 'History Ujian'),
+              _item(12, Icons.healing_outlined, 'Tracking Remedial'),
               const Divider(height: 8),
               _sectionLabel('PENGGUNA'),
               _item(4, Icons.manage_accounts_outlined, 'Manaj. Guru'),
@@ -1283,8 +1285,10 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
             _sectionLabel('MANAJEMEN UJIAN'),
             _item(20, Icons.fact_check_outlined, 'Penilaian'),
             _item(1, Icons.add_task_outlined, 'Buat / Upload Soal'),
+            _item(11, Icons.library_books_outlined, 'Bank Soal'),
             _item(2, Icons.menu_book_outlined, 'Mata Pelajaran'),
             _item(6, Icons.history_edu_outlined, 'History Ujian'),
+            _item(12, Icons.healing_outlined, 'Tracking Remedial'),
             const Divider(height: 8),
 
             // Group: Pengguna
@@ -1366,6 +1370,10 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
         return const AnalyticsScreen(filterMapel: null);
       case 10:
         return const JadwalScreen(role: 'admin1');
+      case 11:
+        return const BankSoalScreen();
+      case 12:
+        return const RemedialTrackingScreen();
       case 20: return LayoutBuilder(builder: (ctx, cst) {
         if (cst.maxWidth >= 600) {
           return Row(children: [_buildAdminKelasPanel(), Expanded(child: _buildAdminPenilaianView())]);
