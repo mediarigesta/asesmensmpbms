@@ -23,6 +23,7 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
   String? _panelKelas;   // null=all, 'Kelas 7','Kelas 8','Kelas 9'
   int _flyoutIdx = -1;   // -1=none, 1=Ujian flyout
   int _ujianTab = 0;     // 0=saat ini,1=terjadwal,2=selesai,3=draft
+  StreamSubscription? _rolesSub;
 
   @override
   void initState() {
@@ -34,13 +35,14 @@ class _GuruDashboardState extends State<GuruDashboard> with IdleTimeoutMixin {
 
   @override
   void dispose() {
+    _rolesSub?.cancel();
     stopIdleWatcher();
     super.dispose();
   }
 
   // Load roles & mapelRoles dari Firestore (real-time)
   void _loadRoles() async {
-    FirebaseFirestore.instance.collection('users').doc(widget.guru.id)
+    _rolesSub = FirebaseFirestore.instance.collection('users').doc(widget.guru.id)
         .snapshots().listen((snap) {
       if (!snap.exists || !mounted) return;
       final data = snap.data() as Map<String, dynamic>? ?? {};

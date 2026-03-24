@@ -20,6 +20,8 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
   int _adminFlyoutIdx = -1;  // -1=none
   int _adminUjianTab = 0;    // 0=saat ini,1=terjadwal,2=selesai,3=draft
   String _broadcastTarget = 'semua'; // 'semua'|'guru'|'siswa'
+  late final Stream<QuerySnapshot> _usersStream =
+      FirebaseFirestore.instance.collection('users').snapshots();
 
   @override
   void initState() {
@@ -35,6 +37,26 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
   }
 
   void _massUpdate(bool aktif) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(aktif ? "Aktifkan Semua Siswa?" : "Blokir Semua Siswa?"),
+        content: Text(aktif
+            ? "Semua akun siswa akan diaktifkan kembali.\nLanjutkan?"
+            : "Semua akun siswa akan diblokir dan tidak bisa login.\nLanjutkan?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Batal")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: aktif ? Colors.green : Colors.red,
+                foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(aktif ? "Aktifkan" : "Blokir"),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
     final s = await FirebaseFirestore.instance
         .collection('users')
         .where('role', isEqualTo: 'siswa')
@@ -56,7 +78,6 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
   }
 
   @override
-  @override
   Widget build(BuildContext context) => _buildAdminNarrowLayout(context);
 
   Widget _buildAdminNarrowLayout(BuildContext context) => Scaffold(
@@ -64,7 +85,7 @@ class _Admin1DashboardState extends State<Admin1Dashboard> with IdleTimeoutMixin
     backgroundColor: context.bm.surface,
     drawer: _buildAdminDrawer(),
     body: StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').snapshots(),
+      stream: _usersStream,
       builder: (c, snap) {
         if (!snap.hasData) {
           return const Center(child: CircularProgressIndicator());

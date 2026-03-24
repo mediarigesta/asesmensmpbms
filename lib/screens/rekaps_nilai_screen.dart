@@ -12,12 +12,14 @@ class RekapsNilaiScreen extends StatefulWidget {
 }
 
 class _RekapsNilaiScreenState extends State<RekapsNilaiScreen> {
-  String? _selectedExamId;
-  String? _selectedExamJudul;
-  List<ExamData> _exams = [];
-  bool _loadingExams = true;
-  bool _loadingRekap = false;
-  List<Map<String, dynamic>> _rekap = [];
+  List<ExamData> _allExams = [];
+  bool _loading = true;
+  String _search = '';
+
+  // Filters
+  String? _filterMapel;
+  String? _filterJenjang;
+  DateTimeRange? _filterTanggal;
 
   @override
   void initState() {
@@ -26,341 +28,319 @@ class _RekapsNilaiScreenState extends State<RekapsNilaiScreen> {
   }
 
   void _loadExams() async {
-    setState(() => _loadingExams = true);
+    setState(() => _loading = true);
     try {
       final snap = await FirebaseFirestore.instance
           .collection('exam')
           .orderBy('waktuMulai', descending: true)
-          .limit(50)
           .get();
 
-      // Ambil ujian native: mode == 'native' ATAU punya sub-koleksi soal
-      // (ujian lama mungkin belum ada field 'mode')
       final List<ExamData> exams = [];
       for (final d in snap.docs) {
-        final data = d.data() as Map<String, dynamic>;
-        final mode = data['mode']?.toString() ?? '';
-        if (mode == 'native') {
-          exams.add(ExamData.fromFirestore(d));
-        } else if (mode.isEmpty) {
-          // Ujian lama tanpa field mode — cek apakah punya soal
-          final soalSnap = await FirebaseFirestore.instance
-              .collection('exam').doc(d.id).collection('soal')
-              .limit(1).get();
-          if (soalSnap.docs.isNotEmpty) {
-            exams.add(ExamData.fromFirestore(d));
-          }
-        }
+        final exam = ExamData.fromFirestore(d);
+        if (exam.isDraft) continue;
+        exams.add(exam);
       }
 
+      // Filter berdasarkan mapel guru jika ada
       var filtered = exams;
       if (widget.filterMapel != null && widget.filterMapel!.isNotEmpty) {
         filtered = exams.where((e) => widget.filterMapel!.contains(e.mapel)).toList();
       }
-      setState(() { _exams = filtered; _loadingExams = false; });
+      setState(() { _allExams = filtered; _loading = false; });
     } catch (e) {
-      setState(() => _loadingExams = false);
+      setState(() => _loading = false);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Gagal memuat daftar ujian: $e'), backgroundColor: Colors.red));
     }
   }
 
-  Future<void> _loadRekap(String examId) async {
-    setState(() { _loadingRekap = true; _rekap = []; });
-    try {
-      // Load soal + kunci
-      final soalSnap = await FirebaseFirestore.instance
-          .collection('exam').doc(examId).collection('soal')
-          .orderBy('nomor').get();
-      final soals = soalSnap.docs.map((d) => SoalModel.fromMap(d.data(), d.id)).toList();
-      final totalSkor = soals.fold<int>(0, (s, q) => s + q.skor);
-
-      // Load semua jawaban siswa untuk exam ini
-      final jwbSnap = await FirebaseFirestore.instance
-          .collection('exam').doc(examId).collection('jawaban')
-          .get();
-
-      if (jwbSnap.docs.isEmpty) {
-        setState(() { _rekap = []; _loadingRekap = false; });
-        return;
-      }
-
-      // Group per siswa
-      final Map<String, List<QueryDocumentSnapshot>> bySiswa = {};
-      for (var d in jwbSnap.docs) {
-        final data = d.data() as Map<String, dynamic>;
-        final siswaId = data['siswaId']?.toString() ?? '';
-        if (siswaId.isEmpty) continue;
-        bySiswa.putIfAbsent(siswaId, () => []).add(d);
-      }
-
-      if (bySiswa.isEmpty) {
-        setState(() { _rekap = []; _loadingRekap = false; });
-        return;
-      }
-
-      // Load nama siswa
-      final List<Map<String, dynamic>> rekap = [];
-      for (final entry in bySiswa.entries) {
-        final siswaId = entry.key;
-        final jwbs = entry.value;
-
-        // Hitung nilai
-        int nilaiPG = 0, nilaiBS = 0;
-        int totalPG = 0, totalBS = 0, totalUraian = 0;
-        int correctPG = 0, correctBS = 0;
-
-        for (final soal in soals) {
-          final jwbDoc = jwbs.cast<QueryDocumentSnapshot?>().firstWhere(
-                  (j) => (j!.data() as Map)['soalId'] == soal.id, orElse: () => null);
-          final jawaban = (jwbDoc?.data() as Map?)?['jawaban']?.toString().toUpperCase() ?? '';
-
-          if (soal.tipe == TipeSoal.pilihanGanda) {
-            totalPG += soal.skor;
-            if (jawaban == soal.kunciJawaban.toUpperCase()) {
-              nilaiPG += soal.skor; correctPG++;
-            }
-          } else if (soal.tipe == TipeSoal.benarSalah) {
-            totalBS += soal.skor;
-            if (jawaban == soal.kunciJawaban.toUpperCase()) {
-              nilaiBS += soal.skor; correctBS++;
-            }
-          } else {
-            totalUraian += soal.skor;
-          }
-        }
-
-        final nilaiOtomatis = nilaiPG + nilaiBS;
-        final persen = totalSkor > 0 ? (nilaiOtomatis / totalSkor * 100).round() : 0;
-
-        // Get nama & kode kelas
-        String nama = siswaId;
-        String kode = '';
-        try {
-          final userDoc = await FirebaseFirestore.instance.collection('users').doc(siswaId).get();
-          if (userDoc.exists) {
-            final ud = userDoc.data() as Map;
-            nama = ud['nama'] ?? siswaId;
-            kode = ud['kode']?.toString() ?? '';
-          }
-        } catch (_) {}
-
-        // Folder kelas: ambil prefix angka+huruf, e.g. "7A01" → "7A", "7B" → "7B"
-        String kelasFolder = '';
-        final matchFolder = RegExp(r'^\d+[A-Za-z]+').stringMatch(kode);
-        if (matchFolder != null) {
-          kelasFolder = matchFolder;
-        } else {
-          final matchAngka = RegExp(r'^\d+').stringMatch(kode);
-          kelasFolder = matchAngka ?? kode;
-        }
-
-        rekap.add({
-          'siswaId': siswaId,
-          'nama': nama,
-          'kode': kode,
-          'kelas': kelasFolder,
-          'nilaiPG': nilaiPG,
-          'nilaiBS': nilaiBS,
-          'nilaiTotal': nilaiOtomatis,
-          'totalSkor': totalSkor,
-          'persen': persen,
-          'correctPG': correctPG,
-          'correctBS': correctBS,
-        });
-      }
-
-      // Sort: urut kelas dulu, lalu nilai tertinggi
-      rekap.sort((a, b) {
-        final kelasA = (a['kelas'] ?? '') as String;
-        final kelasB = (b['kelas'] ?? '') as String;
-        final kelasComp = kelasA.compareTo(kelasB);
-        if (kelasComp != 0) return kelasComp;
-        return ((b['persen'] ?? 0) as int).compareTo((a['persen'] ?? 0) as int);
-      });
-      setState(() { _rekap = rekap; _loadingRekap = false; });
-    } catch (e) {
-      setState(() => _loadingRekap = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+  List<ExamData> get _filteredExams {
+    var list = _allExams;
+    if (_filterMapel != null) {
+      list = list.where((e) => e.mapel == _filterMapel).toList();
     }
+    if (_filterJenjang != null) {
+      list = list.where((e) => e.jenjang == _filterJenjang).toList();
+    }
+    if (_filterTanggal != null) {
+      list = list.where((e) =>
+          !e.waktuMulai.isBefore(_filterTanggal!.start) &&
+          e.waktuMulai.isBefore(_filterTanggal!.end.add(const Duration(days: 1)))).toList();
+    }
+    if (_search.isNotEmpty) {
+      final q = _search.toLowerCase();
+      list = list.where((e) =>
+          e.judul.toLowerCase().contains(q) ||
+          e.mapel.toLowerCase().contains(q) ||
+          e.jenjang.toLowerCase().contains(q)).toList();
+    }
+    return list;
   }
 
-  /// Bangun tampilan rekap dikelompokkan per kelas
-  Widget _buildRekapGrouped() {
-    // Kumpulkan semua kelas unik, urut abjad
-    final kelasSet = <String>{};
-    for (final r in _rekap) kelasSet.add((r['kelas'] ?? '') as String);
-    final kelasList = kelasSet.toList()..sort();
+  Set<String> get _mapelSet => _allExams.map((e) => e.mapel).where((m) => m.isNotEmpty).toSet();
+  Set<String> get _jenjangSet => _allExams.map((e) => e.jenjang).where((j) => j.isNotEmpty).toSet();
 
-    final rataTotal = (_rekap.fold<int>(0, (s, r) => s + ((r['persen'] ?? 0) as int)) / _rekap.length).round();
-
-    return Column(children: [
-      // Summary bar global
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        color: const Color(0xFF0F172A),
-        child: Row(children: [
-          const Icon(Icons.people, color: Colors.white70, size: 16),
-          const SizedBox(width: 6),
-          Text("${_rekap.length} peserta", style: const TextStyle(color: Colors.white, fontSize: 13)),
-          const Spacer(),
-          Text("Rata-rata: $rataTotal%",
-              style: const TextStyle(color: Colors.amber, fontSize: 13, fontWeight: FontWeight.bold)),
-        ]),
+  Future<void> _pickDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: _filterTanggal,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(colorScheme: const ColorScheme.light(primary: Color(0xFF0F172A))),
+        child: child!,
       ),
-      Expanded(
-        child: ListView.builder(
-          padding: const EdgeInsets.all(12),
-          itemCount: kelasList.length,
-          itemBuilder: (c, ki) {
-            final kelas = kelasList[ki];
-            final siswaKelas = _rekap.where((r) => (r['kelas'] ?? '') == kelas).toList();
-            final rataKelas = siswaKelas.isEmpty ? 0
-                : (siswaKelas.fold<int>(0, (s, r) => s + ((r['persen'] ?? 0) as int)) / siswaKelas.length).round();
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header folder kelas
-                Container(
-                  margin: EdgeInsets.only(bottom: 8, top: ki == 0 ? 0 : 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.folder, color: Colors.amber, size: 16),
-                    const SizedBox(width: 8),
-                    Text("Kelas $kelas",
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                    const Spacer(),
-                    Text("${siswaKelas.length} siswa  •  rata-rata $rataKelas%",
-                        style: const TextStyle(color: Colors.white60, fontSize: 11)),
-                  ]),
-                ),
-                // Daftar siswa dalam kelas ini
-                ...siswaKelas.asMap().entries.map((entry) {
-                  final rank = entry.key + 1;
-                  final r = entry.value;
-                  final persen = (r['persen'] ?? 0) as int;
-                  final nilaiColor = persen >= 75 ? Colors.green
-                      : persen >= 60 ? Colors.orange : Colors.red;
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      child: Row(children: [
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: nilaiColor.withValues(alpha: 0.15),
-                          child: Text("$rank",
-                              style: TextStyle(color: nilaiColor, fontWeight: FontWeight.bold, fontSize: 12)),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(r['nama']?.toString() ?? '-', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          const SizedBox(height: 2),
-                          Text("${r['kode'] ?? ''}  •  PG: ${r['correctPG'] ?? 0} benar  •  B/S: ${r['correctBS'] ?? 0} benar",
-                              style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                        ])),
-                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                          Text("$persen%",
-                              style: TextStyle(color: nilaiColor, fontSize: 18, fontWeight: FontWeight.bold)),
-                          Text("${r['nilaiTotal'] ?? 0}/${r['totalSkor'] ?? 0}",
-                              style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                        ]),
-                      ]),
-                    ),
-                  );
-                }),
-              ],
-            );
-          },
-        ),
-      ),
-    ]);
+    );
+    if (picked != null) setState(() => _filterTanggal = picked);
   }
 
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredExams;
+    final mapelList = _mapelSet.toList()..sort();
+    final jenjangs = _jenjangSet.toList()..sort();
+
     return Column(children: [
-      // Pilih ujian
+      // Header + Search
       Container(
-        padding: const EdgeInsets.all(16),
-        color: Colors.white,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text("Rekap Nilai Otomatis", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 4),
-          const Text("Khusus ujian native (bukan Google Form)", style: TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 12),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2))],
+        ),
+        child: Column(children: [
           Row(children: [
-            Expanded(
-              child: _loadingExams
-                  ? const Row(children: [
-                SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                SizedBox(width: 10),
-                Text("Memuat daftar ujian...", style: TextStyle(color: Colors.grey)),
-              ])
-                  : _exams.isEmpty
-                  ? Row(children: [
-                const Icon(Icons.info_outline, color: Colors.orange, size: 16),
-                const SizedBox(width: 8),
-                const Expanded(child: Text(
-                  "Belum ada ujian native. Buat ujian dengan mode 'Via Aplikasi'.",
-                  style: TextStyle(color: Colors.grey, fontSize: 12),
-                )),
-                TextButton.icon(
-                  onPressed: _loadExams,
-                  icon: const Icon(Icons.refresh, size: 14),
-                  label: const Text("Muat Ulang"),
+            const Icon(Icons.grading, color: Color(0xFF0F172A), size: 22),
+            const SizedBox(width: 8),
+            const Expanded(child: Text("Rekap Nilai", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
+            GestureDetector(
+              onTap: _loadExams,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              ])
-                  : DropdownButtonFormField<String>(
-                decoration: InputDecoration(
-                  labelText: "Pilih Ujian",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  isDense: true, filled: true, fillColor: Colors.grey.shade50,
-                ),
-                value: _selectedExamId,
-                items: _exams.map((e) => DropdownMenuItem(
-                  value: e.id,
-                  child: Text("${e.judul} • ${e.jenjang}", overflow: TextOverflow.ellipsis),
-                )).toList(),
-                onChanged: (v) {
-                  setState(() {
-                    _selectedExamId = v;
-                    _selectedExamJudul = _exams.firstWhere((e) => e.id == v).judul;
-                  });
-                  if (v != null) _loadRekap(v);
-                },
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.refresh, size: 14, color: const Color(0xFF0F172A).withValues(alpha: 0.7)),
+                  const SizedBox(width: 4),
+                  Text("Muat Ulang", style: TextStyle(fontSize: 11, color: const Color(0xFF0F172A).withValues(alpha: 0.7), fontWeight: FontWeight.w600)),
+                ]),
               ),
             ),
           ]),
+          const SizedBox(height: 10),
+          // Filter row
+          Row(children: [
+            // Mapel filter
+            Expanded(child: DropdownButtonFormField<String>(
+              value: _filterMapel,
+              decoration: InputDecoration(
+                labelText: "Mapel", isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+              style: const TextStyle(fontSize: 12, color: Colors.black87),
+              items: [
+                const DropdownMenuItem(value: null, child: Text("Semua Mapel", style: TextStyle(fontSize: 12))),
+                ...mapelList.map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12)))),
+              ],
+              onChanged: (v) => setState(() => _filterMapel = v),
+            )),
+            const SizedBox(width: 8),
+            // Kelas/Jenjang filter
+            Expanded(child: DropdownButtonFormField<String>(
+              value: _filterJenjang,
+              decoration: InputDecoration(
+                labelText: "Kelas", isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+              style: const TextStyle(fontSize: 12, color: Colors.black87),
+              items: [
+                const DropdownMenuItem(value: null, child: Text("Semua Kelas", style: TextStyle(fontSize: 12))),
+                ...jenjangs.map((j) => DropdownMenuItem(value: j, child: Text(j, style: const TextStyle(fontSize: 12)))),
+              ],
+              onChanged: (v) => setState(() => _filterJenjang = v),
+            )),
+            const SizedBox(width: 8),
+            // Date range
+            GestureDetector(
+              onTap: _pickDateRange,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(8),
+                  color: _filterTanggal != null ? const Color(0xFF0F172A).withValues(alpha: 0.06) : null,
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.date_range, size: 14,
+                      color: _filterTanggal != null ? const Color(0xFF0F172A) : Colors.grey),
+                  const SizedBox(width: 4),
+                  Text(
+                    _filterTanggal != null
+                        ? "${DateFormat('dd/MM').format(_filterTanggal!.start)} - ${DateFormat('dd/MM').format(_filterTanggal!.end)}"
+                        : "Tanggal",
+                    style: TextStyle(fontSize: 11,
+                        color: _filterTanggal != null ? const Color(0xFF0F172A) : Colors.grey.shade600,
+                        fontWeight: _filterTanggal != null ? FontWeight.bold : FontWeight.normal),
+                  ),
+                  if (_filterTanggal != null) ...[
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: () => setState(() => _filterTanggal = null),
+                      child: const Icon(Icons.close, size: 14, color: Colors.red),
+                    ),
+                  ],
+                ]),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          // Search
+          TextField(
+            decoration: InputDecoration(
+              hintText: "Cari ujian...",
+              prefixIcon: const Icon(Icons.search, size: 18),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              isDense: true, filled: true, fillColor: Colors.grey.shade50,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            ),
+            style: const TextStyle(fontSize: 13),
+            onChanged: (v) => setState(() => _search = v),
+          ),
+        ]),
+      ),
+
+      // Stats bar
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: const Color(0xFF0F172A),
+        child: Row(children: [
+          const Icon(Icons.assessment, color: Colors.white70, size: 16),
+          const SizedBox(width: 6),
+          Text("${filtered.length} ujian ditemukan", style: const TextStyle(color: Colors.white, fontSize: 12)),
+          const Spacer(),
+          if (_filterMapel != null || _filterJenjang != null || _filterTanggal != null)
+            GestureDetector(
+              onTap: () => setState(() { _filterMapel = null; _filterJenjang = null; _filterTanggal = null; }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.filter_alt_off, size: 12, color: Colors.white70),
+                  SizedBox(width: 4),
+                  Text("Reset Filter", style: TextStyle(fontSize: 10, color: Colors.white70)),
+                ]),
+              ),
+            ),
         ]),
       ),
 
       // Content
       Expanded(
-        child: _loadingRekap
+        child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : _rekap.isEmpty
-            ? Center(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(_selectedExamId == null ? Icons.grading : Icons.inbox_outlined,
-                size: 60, color: Colors.grey),
-            const SizedBox(height: 12),
-            Text(_selectedExamId == null
-                ? "Pilih ujian untuk melihat rekap nilai"
-                : "Belum ada siswa yang mengerjakan",
-                style: const TextStyle(color: Colors.grey)),
-          ]),
-        )
-            : _buildRekapGrouped(),
+            : filtered.isEmpty
+                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.grading, size: 60, color: Colors.grey.shade300),
+                    const SizedBox(height: 12),
+                    const Text("Tidak ada ujian ditemukan", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                    const SizedBox(height: 4),
+                    const Text("Coba ubah filter atau cari dengan kata kunci lain.",
+                        style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ]))
+                : ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: filtered.length,
+                    itemBuilder: (ctx, i) => _buildExamCard(filtered[i]),
+                  ),
       ),
     ]);
+  }
+
+  Widget _buildExamCard(ExamData exam) {
+    final statusColor = exam.sudahSelesai
+        ? Colors.grey : exam.isOngoing ? Colors.green : Colors.orange;
+    final statusLabel = exam.sudahSelesai
+        ? "SELESAI" : exam.isOngoing ? "BERLANGSUNG" : "BELUM MULAI";
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => ExamHistoryScreen(exam: exam))),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Title row
+            Row(children: [
+              Expanded(child: Text(exam.judul,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  maxLines: 2, overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(12)),
+                child: Text(statusLabel,
+                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            // Info chips
+            Wrap(spacing: 6, runSpacing: 4, children: [
+              _infoChip(Icons.book, exam.mapel, Colors.blue),
+              _infoChip(Icons.school, exam.jenjang, Colors.teal),
+              _infoChip(Icons.calendar_today,
+                  DateFormat('dd MMM yyyy').format(exam.waktuMulai), Colors.purple),
+              _infoChip(Icons.schedule,
+                  "${DateFormat('HH:mm').format(exam.waktuMulai)} - ${DateFormat('HH:mm').format(exam.waktuSelesai)}",
+                  Colors.indigo),
+              if (exam.mode == 'native')
+                _infoChip(Icons.smartphone, "Native", Colors.deepOrange),
+              if (exam.spiType == 'remedial')
+                _infoChip(Icons.healing, "Remedial", Colors.deepOrange),
+              if (exam.spiType == 'susulan')
+                _infoChip(Icons.event_repeat, "Susulan", Colors.indigo),
+              if (exam.kkm > 0)
+                _infoChip(Icons.verified, "KKM: ${exam.kkm}", Colors.teal),
+            ]),
+            const SizedBox(height: 8),
+            // Footer
+            Row(children: [
+              if (exam.creatorName.isNotEmpty) ...[
+                Icon(Icons.person_outline, size: 13, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Text(exam.creatorName,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                const Spacer(),
+              ] else
+                const Spacer(),
+              const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoChip(IconData icon, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 11, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+      ]),
+    );
   }
 }
 

@@ -46,7 +46,12 @@ mixin IdleTimeoutMixin<T extends StatefulWidget> on State<T> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('saved_user_id');
+              await prefs.remove('saved_username');
+              await prefs.remove('saved_password');
+              if (!context.mounted) return;
               Navigator.pop(context);
               Navigator.pushAndRemoveUntil(
                 context,

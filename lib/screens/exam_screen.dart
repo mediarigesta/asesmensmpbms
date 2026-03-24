@@ -19,6 +19,7 @@ class _ExamScreenState extends State<ExamScreen>
   bool _submitted = false;
   int _curang = 0;
   Timer? _autoSubmitTimer;
+  StreamSubscription? _broadcastSub;
 
   @override
   void initState() {
@@ -55,7 +56,7 @@ class _ExamScreenState extends State<ExamScreen>
     }
 
     // Broadcast listener
-    FirebaseFirestore.instance
+    _broadcastSub = FirebaseFirestore.instance
         .collection('settings')
         .doc('broadcast')
         .snapshots()
@@ -64,7 +65,7 @@ class _ExamScreenState extends State<ExamScreen>
       final d = s.data() as Map?;
       final msg = d?['message']?.toString() ?? "";
       final target = d?['target']?.toString() ?? 'semua';
-      if (msg.isNotEmpty && (target == 'semua' || target == 'guru')) {
+      if (msg.isNotEmpty && (target == 'semua' || target == 'siswa')) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Row(children: [
             const Icon(Icons.campaign, color: Colors.white),
@@ -268,6 +269,7 @@ class _ExamScreenState extends State<ExamScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoSubmitTimer?.cancel();
+    _broadcastSub?.cancel();
     super.dispose();
   }
 

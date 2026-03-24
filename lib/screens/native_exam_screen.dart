@@ -66,6 +66,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
 
   // ── Polling timer — paksa kunci tetap aktif ──
   Timer? _kioskEnforceTimer;
+  StreamSubscription? _broadcastSub;
 
   @override
   void initState() {
@@ -94,7 +95,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
     }
 
     // Broadcast listener
-    FirebaseFirestore.instance
+    _broadcastSub = FirebaseFirestore.instance
         .collection('settings')
         .doc('broadcast')
         .snapshots()
@@ -758,6 +759,7 @@ class _NativeExamScreenState extends State<NativeExamScreen> with WidgetsBinding
     _pinCooldownTimer?.cancel();
     _proktorCooldownTimer?.cancel();
     _kioskEnforceTimer?.cancel();
+    _broadcastSub?.cancel();
     _kioskPinCtrl.dispose();
     _proktorPinCtrl.dispose();
     if (isAndroid) {

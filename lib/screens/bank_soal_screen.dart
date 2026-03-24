@@ -14,6 +14,7 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
   String? _selMapel;
   String? _selTopik;
   String? _selTingkat;
+  String? _selJenjang;
   String _search = '';
   bool _importing = false;
 
@@ -48,6 +49,8 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
           // Filter row
           Row(children: [
             Expanded(child: _buildFilterDropdown()),
+            const SizedBox(width: 8),
+            Expanded(child: _buildJenjangFilter()),
             const SizedBox(width: 8),
             Expanded(child: _buildTopikFilter()),
             const SizedBox(width: 8),
@@ -127,6 +130,39 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
     );
   }
 
+  Widget _buildJenjangFilter() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _selMapel != null
+          ? FirebaseFirestore.instance.collection('bank_soal').where('mapel', isEqualTo: _selMapel).snapshots()
+          : FirebaseFirestore.instance.collection('bank_soal').snapshots(),
+      builder: (ctx, snap) {
+        final jenjangSet = <String>{};
+        if (snap.hasData) {
+          for (final doc in snap.data!.docs) {
+            final j = (doc.data() as Map)['jenjang']?.toString() ?? '';
+            if (j.isNotEmpty) jenjangSet.add(j);
+          }
+        }
+        final jenjangList = jenjangSet.toList()..sort();
+        return DropdownButtonFormField<String>(
+          value: _selJenjang,
+          decoration: InputDecoration(
+            labelText: "Kelas",
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+          style: const TextStyle(fontSize: 12, color: Colors.black87),
+          items: [
+            const DropdownMenuItem(value: null, child: Text("Semua Kelas", style: TextStyle(fontSize: 12))),
+            ...jenjangList.map((j) => DropdownMenuItem(value: j, child: Text(j, style: const TextStyle(fontSize: 12)))),
+          ],
+          onChanged: (v) => setState(() => _selJenjang = v),
+        );
+      },
+    );
+  }
+
   Widget _buildTopikFilter() {
     return StreamBuilder<QuerySnapshot>(
       stream: _selMapel != null
@@ -181,6 +217,7 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
   Widget _buildBankSoalList() {
     Query query = FirebaseFirestore.instance.collection('bank_soal').orderBy('createdAt', descending: true);
     if (_selMapel != null) query = query.where('mapel', isEqualTo: _selMapel);
+    if (_selJenjang != null) query = query.where('jenjang', isEqualTo: _selJenjang);
     if (_selTopik != null) query = query.where('topik', isEqualTo: _selTopik);
     if (_selTingkat != null) query = query.where('tingkatKesulitan', isEqualTo: _selTingkat);
 
@@ -221,11 +258,13 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
           ));
         }
 
-        // Group by mapel + topik
+        // Group by mapel + jenjang + topik
         final Map<String, List<QueryDocumentSnapshot>> grouped = {};
         for (final doc in docs) {
           final data = doc.data() as Map<String, dynamic>;
-          final key = "${data['mapel'] ?? 'Lainnya'} — ${data['topik'] ?? 'Tanpa Topik'}";
+          final jenjang = (data['jenjang'] ?? '').toString();
+          final jenjangLabel = jenjang.isNotEmpty ? ' [$jenjang]' : '';
+          final key = "${data['mapel'] ?? 'Lainnya'}$jenjangLabel — ${data['topik'] ?? 'Tanpa Topik'}";
           grouped.putIfAbsent(key, () => []).add(doc);
         }
         final sortedKeys = grouped.keys.toList()..sort();
@@ -723,6 +762,7 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
         final data = doc.data();
         batch.set(FirebaseFirestore.instance.collection('bank_soal').doc(), {
           'mapel': exam.mapel,
+          'jenjang': exam.jenjang,
           'topik': topikResult.trim().isNotEmpty ? topikResult.trim() : exam.judul,
           'tingkatKesulitan': 'sedang',
           'tipe': data['tipe'] ?? 'pilihanGanda',
@@ -733,6 +773,7 @@ class _BankSoalScreenState extends State<BankSoalScreen> {
           'skor': data['skor'] ?? 1,
           'createdAt': FieldValue.serverTimestamp(),
           'sourceExamId': exam.id,
+          'sourceExamTitle': exam.judul,
         });
         count++;
       }

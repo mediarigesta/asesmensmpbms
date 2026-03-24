@@ -518,6 +518,9 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
                   // Notifikasi jadwal ujian hari ini
                   _buildTodayJadwalNotif(),
 
+                  // Reminder ujian mendatang (1-3 hari ke depan)
+                  _buildUpcomingExamsReminder(),
+
                   // Cek status siswa secara realtime dari Firestore
                   StreamBuilder<DocumentSnapshot>(
                     stream: FirebaseFirestore.instance
@@ -1241,6 +1244,104 @@ class _HomeScreenState extends State<HomeScreen> with IdleTimeoutMixin {
     ];
     final monthName = months[today.month - 1];
     return lo.contains('$d $monthName') || lo.contains('$d2 $monthName');
+  }
+
+  /// Banner: ujian terjadwal dalam 3 hari ke depan (dari collection exam)
+  Widget _buildUpcomingExamsReminder() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('exam')
+          .where('status', isEqualTo: 'published')
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) return const SizedBox.shrink();
+        final now = DateTime.now();
+        final threeDaysLater = now.add(const Duration(days: 3));
+        final upcoming = snap.data!.docs
+            .map((d) => ExamData.fromFirestore(d))
+            .where((e) =>
+                e.waktuMulai.isAfter(now) &&
+                e.waktuMulai.isBefore(threeDaysLater) &&
+                !e.isDraft &&
+                widget.user.matchJenjang(e.jenjang))
+            .toList()
+          ..sort((a, b) => a.waktuMulai.compareTo(b.waktuMulai));
+
+        if (upcoming.isEmpty) return const SizedBox.shrink();
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF7ED),
+            border: Border.all(color: const Color(0xFFFBBF24)),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.notifications_active, color: Color(0xFFD97706), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Ujian Mendatang (${upcoming.length})',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Color(0xFFD97706))),
+                    const SizedBox(height: 6),
+                    ...upcoming.map((e) {
+                      final diff = e.waktuMulai.difference(now);
+                      String waktuLabel;
+                      if (diff.inMinutes < 60) {
+                        waktuLabel = '${diff.inMinutes} menit lagi';
+                      } else if (diff.inHours < 24) {
+                        waktuLabel = '${diff.inHours} jam lagi';
+                      } else {
+                        waktuLabel = '${diff.inDays} hari lagi';
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(children: [
+                          Icon(
+                            diff.inHours < 1 ? Icons.alarm : Icons.schedule,
+                            size: 13,
+                            color: diff.inHours < 1 ? Colors.red : const Color(0xFF92400E),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '${e.judul} · ${e.mapel}',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF92400E), fontWeight: FontWeight.w500),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: diff.inHours < 1
+                                  ? Colors.red.withValues(alpha: 0.15)
+                                  : const Color(0xFFFDE68A),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(waktuLabel,
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: diff.inHours < 1 ? Colors.red : const Color(0xFF92400E))),
+                          ),
+                        ]),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   /// Banner: jadwal ujian siswa hari ini (dari jadwal/ujian)

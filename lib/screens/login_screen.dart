@@ -375,8 +375,9 @@ class _LoginScreenState extends State<LoginScreen> {
             MaterialPageRoute(builder: (_) => HomeScreen(user: u)));
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
-      _snack("Terjadi kesalahan. Coba lagi.", Colors.red);
+      _snack("Gagal login: ${e.toString()}", Colors.red);
     }
   }
 

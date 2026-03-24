@@ -266,9 +266,52 @@ class _ExamEditScreenState extends State<ExamEditScreen> with SingleTickerProvid
       }
       await FirebaseFirestore.instance.collection('exam').doc(widget.exam.id)
           .update({'jumlahSoal': _soals.length});
+
+      // ── Auto-import ke Bank Soal ──
+      try {
+        // Hapus soal lama dari bank yang berasal dari ujian ini
+        final oldBank = await FirebaseFirestore.instance.collection('bank_soal')
+            .where('sourceExamId', isEqualTo: widget.exam.id).get();
+        if (oldBank.docs.isNotEmpty) {
+          final delBatch = FirebaseFirestore.instance.batch();
+          for (var d in oldBank.docs) delBatch.delete(d.reference);
+          await delBatch.commit();
+        }
+        // Simpan soal baru ke bank
+        final bankBatch = FirebaseFirestore.instance.batch();
+        for (int i = 0; i < _soals.length; i++) {
+          final s = _soals[i];
+          final piOpts = s.tipe == TipeSoal.pilihanGanda
+              ? s.pilihan.asMap().entries
+                  .where((e) => e.value.trim().isNotEmpty)
+                  .map((e) => '${String.fromCharCode(65 + e.key)}. ${e.value}')
+                  .toList()
+              : <String>[];
+          bankBatch.set(FirebaseFirestore.instance.collection('bank_soal').doc(), {
+            'mapel': _mapel,
+            'jenjang': _jenjang,
+            'topik': _judulCtrl.text.trim(),
+            'tingkatKesulitan': 'sedang',
+            'tipe': s.tipe.name,
+            'pertanyaan': s.pertanyaan.trim(),
+            'gambar': s.gambarBase64 ?? '',
+            'pilihan': piOpts,
+            'kunciJawaban': s.kunciJawaban.toUpperCase(),
+            'skor': s.skor,
+            'createdAt': FieldValue.serverTimestamp(),
+            'sourceExamId': widget.exam.id,
+            'sourceExamTitle': _judulCtrl.text.trim(),
+          });
+        }
+        await bankBatch.commit();
+      } catch (bankErr) {
+        debugPrint('Auto-import bank_soal error: $bankErr');
+      }
+
       setState(() => _soalUploading = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Soal berhasil disimpan!'), backgroundColor: Colors.green));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Soal berhasil disimpan! (${_soals.length} soal juga diimport ke Bank Soal)'),
+          backgroundColor: Colors.green));
     } catch (e) {
       setState(() => _soalUploading = false);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(

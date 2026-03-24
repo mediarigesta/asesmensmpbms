@@ -1721,6 +1721,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
 
     await FirebaseFirestore.instance.collection('bank_soal').add({
       'mapel': exam.mapel,
+      'jenjang': exam.jenjang,
       'topik': topik.trim().isNotEmpty ? topik.trim() : exam.judul,
       'tingkatKesulitan': tingkat,
       'tipe': soal.tipe.name,
@@ -1731,6 +1732,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
       'skor': soal.skor,
       'createdAt': FieldValue.serverTimestamp(),
       'sourceExamId': exam.id,
+      'sourceExamTitle': exam.judul,
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1796,6 +1798,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
 
       batch.set(FirebaseFirestore.instance.collection('bank_soal').doc(), {
         'mapel': exam.mapel,
+        'jenjang': exam.jenjang,
         'topik': topik.trim().isNotEmpty ? topik.trim() : exam.judul,
         'tingkatKesulitan': tingkat,
         'tipe': soal.tipe.name,
@@ -1806,6 +1809,7 @@ class _ExamHistoryScreenState extends State<ExamHistoryScreen> {
         'skor': soal.skor,
         'createdAt': FieldValue.serverTimestamp(),
         'sourceExamId': exam.id,
+        'sourceExamTitle': exam.judul,
       });
     }
     await batch.commit();
